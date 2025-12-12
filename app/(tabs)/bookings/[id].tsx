@@ -1,0 +1,133 @@
+import React from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import Colors from '@/constants/colors';
+import { useI18nStore } from '@/constants/i18n';
+import { useBookingStore } from '@/store/bookingStore';
+import { useChatStore } from '@/store/chatStore';
+
+import { useAuthStore } from '@/store/authStore';
+
+export default function BookingDetailsScreen() {
+  const { id } = useLocalSearchParams();
+  const router = useRouter();
+  const t = useI18nStore((state) => state.t);
+  const bookings = useBookingStore((state) => state.bookings);
+  const createConversation = useChatStore((state) => state.createConversation);
+  const user = useAuthStore((state) => state.user);
+  
+  const booking = bookings.find(b => b.id === id);
+
+  if (!booking) {
+    return (
+      <View style={styles.container}>
+        <Text style={{ color: Colors.text }}>Booking not found</Text>
+      </View>
+    );
+  }
+
+  const handleContact = () => {
+    if (!user) return;
+    // Create a new conversation about this booking
+    createConversation(
+      `Inquiry about booking #${booking.id}`, 
+      `Hello, I have a question about my booking for ${booking.packageTitle}.`,
+      user.id,
+      user.name,
+      booking.id
+    );
+    // Navigate to chat list (simplest for now, or direct to chat)
+    router.push('/chat'); 
+  };
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.card}>
+        <Text style={styles.label}>Booking Reference</Text>
+        <Text style={styles.value}>{booking.id}</Text>
+        
+        <View style={styles.divider} />
+        
+        <Text style={styles.label}>Package</Text>
+        <Text style={styles.value}>{booking.packageTitle}</Text>
+
+        <View style={styles.divider} />
+
+        <Text style={styles.label}>Status</Text>
+        <Text style={[styles.value, { color: Colors.tint }]}>{t(booking.status)}</Text>
+
+        <View style={styles.divider} />
+
+        <Text style={styles.label}>Dates</Text>
+        <Text style={styles.value}>{booking.startDate} - {booking.endDate}</Text>
+
+        <View style={styles.divider} />
+
+        <Text style={styles.label}>Travelers</Text>
+        <Text style={styles.value}>{booking.travelers}</Text>
+
+        {booking.notes ? (
+          <>
+            <View style={styles.divider} />
+            <Text style={styles.label}>Notes</Text>
+            <Text style={styles.value}>{booking.notes}</Text>
+          </>
+        ) : null}
+      </View>
+
+      <TouchableOpacity style={styles.button} onPress={handleContact}>
+        <Text style={styles.buttonText}>{t('openConversation')}</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  content: {
+    padding: 24,
+  },
+  card: {
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 24,
+  },
+  label: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+    letterSpacing: 1,
+  },
+  value: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 16,
+  },
+  button: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: Colors.tint,
+    height: 56,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: Colors.tint,
+    fontSize: 16,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+});

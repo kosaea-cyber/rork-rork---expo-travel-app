@@ -1,0 +1,15 @@
+{
+  "users": [],
+  "categories": [],
+  "packages": [],
+  "bookings": [],
+  "conversations": [],
+  "messages": [],
+  "blogs": [],
+  "faqs": [],
+  "settings": {
+    "heroSlides": [],
+    "images": {}
+  },
+  "sessions": {}
+}
