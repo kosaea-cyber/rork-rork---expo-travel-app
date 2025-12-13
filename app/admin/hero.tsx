@@ -13,10 +13,10 @@ import {
 import Colors from '@/constants/colors';
 import { Plus, Trash2, Save, Image as ImageIcon, Pencil } from 'lucide-react-native';
 import LocalizedInput from '@/components/admin/LocalizedInput';
-import * as ImagePicker from 'expo-image-picker';
 import { AsyncImage } from '@/components/AsyncImage';
 import { supabase } from '@/lib/supabase/client';
-import { useProfileStore } from '@/store/profileStore';
+import AdminGuard from '@/components/admin/AdminGuard';
+import { pickAndUploadImage } from '@/lib/supabase/storageUpload';
 
 type HeroSlideRow = {
   id: string;
@@ -76,50 +76,13 @@ function toRowInsert(form: SlideFormState) {
   };
 }
 
-async function uploadHeroImageToSupabase(uri: string): Promise<string> {
-  const extGuess = (() => {
-    const lower = uri.toLowerCase();
-    if (lower.includes('.png')) return 'png';
-    if (lower.includes('.webp')) return 'webp';
-    return 'jpg';
-  })();
-
-  const fileName = `hero/${Date.now()}-${Math.random().toString(16).slice(2)}.${extGuess}`;
-  const blob = await fetch(uri).then((r) => r.blob());
-
-  const contentType = blob.type || (extGuess === 'png' ? 'image/png' : extGuess === 'webp' ? 'image/webp' : 'image/jpeg');
-
-  const uploadRes = await supabase.storage.from('app-media').upload(fileName, blob, {
-    contentType,
-    upsert: false,
-  });
-
-  console.log('[admin/hero] storage upload result', {
-    path: fileName,
-    error: uploadRes.error?.message ?? null,
-  });
-
-  if (uploadRes.error) {
-    throw new Error(uploadRes.error.message);
-  }
-
-  const pub = supabase.storage.from('app-media').getPublicUrl(fileName);
-  const publicUrl = pub.data.publicUrl;
-  if (!publicUrl) {
-    throw new Error('Failed to get public URL');
-  }
-
-  return publicUrl;
-}
-
 export default function ManageHero() {
-  const role = useProfileStore((s) => s.role);
-
   const [slides, setSlides] = useState<HeroSlideRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   const [saving, setSaving] = useState<boolean>(false);
+  const [rowSavingId, setRowSavingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | 'new' | null>(null);
 
   const [form, setForm] = useState<SlideFormState>({
@@ -130,7 +93,6 @@ export default function ManageHero() {
     sort_order: 0,
   });
 
-  const isAdmin = role === 'admin';
 
   const fetchSlides = useCallback(async () => {
     setLoading(true);
@@ -213,11 +175,6 @@ export default function ManageHero() {
   };
 
   const handleSave = async () => {
-    if (!isAdmin) {
-      Alert.alert('Not allowed', 'Admin access required.');
-      return;
-    }
-
     if (!form.image_url) {
       Alert.alert('Error', 'Image is required');
       return;
@@ -258,27 +215,15 @@ export default function ManageHero() {
   };
 
   const pickImage = async () => {
-    if (!isAdmin) {
-      Alert.alert('Not allowed', 'Admin access required.');
-      return;
-    }
-
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.85,
-      });
-
-      if (result.canceled) return;
-
-      const asset = result.assets[0];
-      if (!asset?.uri) return;
-
       setSaving(true);
-      const publicUrl = await uploadHeroImageToSupabase(asset.uri);
-      setForm((prev) => ({ ...prev, image_url: publicUrl }));
+      const res = await pickAndUploadImage({ folder: 'hero', bucket: 'app-media' });
+      console.log('[admin/hero] pickAndUploadImage result', {
+        hasResult: Boolean(res),
+        urlPrefix: res?.publicUrl?.slice(0, 28) ?? null,
+      });
+      if (!res) return;
+      setForm((prev) => ({ ...prev, image_url: res.publicUrl }));
     } catch (e) {
       console.error('[admin/hero] pickImage/upload failed', e);
       Alert.alert('Upload failed', e instanceof Error ? e.message : 'Unknown error');
@@ -296,22 +241,7 @@ export default function ManageHero() {
     }
   }, [fetchSlides]);
 
-  if (!isAdmin) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: Colors.text, fontSize: 16, fontWeight: '700' }}>Admin access required</Text>
-        <Text style={{ color: Colors.textSecondary, marginTop: 8, textAlign: 'center' }}>
-          This screen is only available for admin accounts.
-        </Text>
-      </View>
-    );
-  }
-
-  if (loading) {
-    return <ActivityIndicator testID="admin-hero-loading" size="large" color={Colors.tint} style={{ marginTop: 50 }} />;
-  }
-
-  return (
+  const content = (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 80 }}>
       {!editingId && (
         <View>
@@ -330,20 +260,109 @@ export default function ManageHero() {
           {slides.map((slide) => (
             <View key={slide.id} style={styles.slideCard}>
               <AsyncImage uri={slide.image_url} style={styles.thumbnail} />
+
               <View style={styles.slideInfo}>
                 <Text style={styles.slideTitle} numberOfLines={1}>
                   {slide.title_en ?? 'Untitled'}
                 </Text>
-                <Text style={styles.slideMeta}>
-                  {(slide.is_active ? 'Active' : 'Inactive') + ` • Order: ${slide.sort_order ?? 0}`}
-                </Text>
+
+                <View style={styles.metaRow}>
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{slide.is_active ? 'Active' : 'Inactive'}</Text>
+                  </View>
+
+                  <View style={styles.orderRow}>
+                    <Text style={styles.orderLabel}>Order</Text>
+                    <TextInput
+                      testID={`admin-hero-sort-${slide.id}`}
+                      style={styles.orderInput}
+                      keyboardType="number-pad"
+                      value={String(slide.sort_order ?? 0)}
+                      onChangeText={(t) => {
+                        const next = Number.parseInt(t || '0', 10) || 0;
+                        setSlides((prev) => prev.map((s) => (s.id === slide.id ? { ...s, sort_order: next } : s)));
+                      }}
+                    />
+                    <TouchableOpacity
+                      testID={`admin-hero-sort-save-${slide.id}`}
+                      onPress={async () => {
+                        try {
+                          setRowSavingId(slide.id);
+                          const res = await supabase
+                            .from('hero_slides')
+                            .update({ sort_order: slide.sort_order ?? 0 })
+                            .eq('id', slide.id);
+
+                          console.log('[admin/hero] update sort_order', {
+                            id: slide.id,
+                            sort_order: slide.sort_order ?? 0,
+                            error: res.error?.message ?? null,
+                          });
+
+                          if (res.error) {
+                            Alert.alert('Error', res.error.message);
+                            await fetchSlides();
+                            return;
+                          }
+
+                          await fetchSlides();
+                        } catch (e) {
+                          console.error('[admin/hero] update sort_order unexpected error', e);
+                          Alert.alert('Error', 'Failed to update sort order');
+                          await fetchSlides();
+                        } finally {
+                          setRowSavingId(null);
+                        }
+                      }}
+                      disabled={saving || rowSavingId === slide.id}
+                      style={styles.miniButton}
+                    >
+                      {rowSavingId === slide.id ? (
+                        <ActivityIndicator color={Colors.tint} />
+                      ) : (
+                        <Save size={16} color={Colors.tint} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.toggleRow}>
+                  <Text style={styles.toggleLabel}>Show</Text>
+                  <Switch
+                    testID={`admin-hero-toggle-${slide.id}`}
+                    value={slide.is_active}
+                    onValueChange={async (v) => {
+                      setSlides((prev) => prev.map((s) => (s.id === slide.id ? { ...s, is_active: v } : s)));
+                      try {
+                        setRowSavingId(slide.id);
+                        const res = await supabase.from('hero_slides').update({ is_active: v }).eq('id', slide.id);
+                        console.log('[admin/hero] toggle is_active', { id: slide.id, is_active: v, error: res.error?.message ?? null });
+                        if (res.error) {
+                          Alert.alert('Error', res.error.message);
+                          await fetchSlides();
+                          return;
+                        }
+                      } catch (e) {
+                        console.error('[admin/hero] toggle is_active unexpected error', e);
+                        Alert.alert('Error', 'Failed to update');
+                        await fetchSlides();
+                      } finally {
+                        setRowSavingId(null);
+                      }
+                    }}
+                  />
+                </View>
               </View>
 
               <View style={styles.actions}>
-                <TouchableOpacity testID={`admin-hero-edit-${slide.id}`} onPress={() => handleEdit(slide)}>
+                <TouchableOpacity testID={`admin-hero-edit-${slide.id}`} onPress={() => handleEdit(slide)} disabled={saving || rowSavingId === slide.id}>
                   <Pencil size={18} color={Colors.tint} />
                 </TouchableOpacity>
-                <TouchableOpacity testID={`admin-hero-delete-${slide.id}`} onPress={() => handleDelete(slide.id)} disabled={saving}>
+                <TouchableOpacity
+                  testID={`admin-hero-delete-${slide.id}`}
+                  onPress={() => handleDelete(slide.id)}
+                  disabled={saving || rowSavingId === slide.id}
+                >
                   <Trash2 size={18} color={Colors.error} style={{ marginLeft: 10 }} />
                 </TouchableOpacity>
               </View>
@@ -436,6 +455,16 @@ export default function ManageHero() {
       )}
     </ScrollView>
   );
+
+  return (
+    <AdminGuard>
+      {loading ? (
+        <ActivityIndicator testID="admin-hero-loading" size="large" color={Colors.tint} style={{ marginTop: 50 }} />
+      ) : (
+        content
+      )}
+    </AdminGuard>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -495,6 +524,68 @@ const styles = StyleSheet.create({
   slideInfo: {
     flex: 1,
     marginLeft: 12,
+    gap: 10,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  badgeText: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  orderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  orderLabel: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  orderInput: {
+    width: 48,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    color: Colors.text,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  miniButton: {
+    width: 36,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toggleLabel: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '800',
   },
   slideTitle: {
     fontWeight: '900',
