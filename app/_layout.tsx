@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import { initI18n } from "@/constants/i18n";
 import { StatusBar } from "expo-status-bar";
+import { supabase } from "@/lib/supabase/client";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -19,6 +20,24 @@ export default function RootLayout() {
   useEffect(() => {
     initI18n();
     checkAuth();
+
+    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[RootLayout] supabase auth state change', {
+        event,
+        hasSession: Boolean(session),
+        userId: session?.user?.id ?? null,
+      });
+
+      try {
+        await checkAuth();
+      } catch (e) {
+        console.error('[RootLayout] checkAuth failed after auth state change', e);
+      }
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
   }, [checkAuth]);
 
   useEffect(() => {

@@ -27,6 +27,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isResending, setIsResending] = useState<boolean>(false);
 
   const setProfile = useProfileStore((s) => s.setProfile);
   const clearProfile = useProfileStore((s) => s.clearProfile);
@@ -49,14 +50,22 @@ export default function LoginScreen() {
 
   const handleLogin = useCallback(async () => {
     console.log('[login] pressed');
-    console.log('[login] email', email);
 
-    if (!email || !password) return;
+    const normalizedEmail = email.trim().toLowerCase();
+    console.log('[login] email', normalizedEmail);
+
+    if (!normalizedEmail || !password) {
+      Alert.alert('Missing info', 'Please enter both email and password.');
+      return;
+    }
 
     setIsLoading(true);
     try {
       console.log('[login] starting signInWithPassword');
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
       console.log('[auth/login] signInWithPassword result', {
         hasSession: Boolean(data.session),
         hasUser: Boolean(data.user),
@@ -64,6 +73,26 @@ export default function LoginScreen() {
       });
 
       if (error) {
+        console.error('[auth/login] signInWithPassword error', {
+          message: error.message,
+          status: (error as { status?: number } | null)?.status ?? null,
+          name: (error as { name?: string } | null)?.name ?? null,
+        });
+
+        const msg = error.message.toLowerCase();
+        if (msg.includes('email not confirmed') || msg.includes('not confirmed')) {
+          Alert.alert(
+            'Email not confirmed',
+            'Please confirm your email address. If you did not receive the email, tap “Resend confirmation email”.'
+          );
+          return;
+        }
+
+        if (msg.includes('invalid login credentials')) {
+          Alert.alert('Login failed', 'Invalid email or password.');
+          return;
+        }
+
         Alert.alert('Login failed', error.message);
         return;
       }
@@ -130,6 +159,33 @@ export default function LoginScreen() {
     }
   }, [email, password, router, setProfile, clearProfile]);
 
+  const handleResendConfirmation = useCallback(async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    console.log('[login] resend confirmation pressed', { normalizedEmail });
+
+    if (!normalizedEmail) {
+      Alert.alert('Email required', 'Enter your email first.');
+      return;
+    }
+
+    setIsResending(true);
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email: normalizedEmail });
+      if (error) {
+        console.error('[login] resend confirmation error', error);
+        Alert.alert('Could not resend', error.message);
+        return;
+      }
+
+      Alert.alert('Sent', 'Confirmation email sent. Please check your inbox and spam folder.');
+    } catch (e) {
+      console.error('[login] resend confirmation unexpected error', e);
+      Alert.alert('Could not resend', 'Unexpected error. Please try again.');
+    } finally {
+      setIsResending(false);
+    }
+  }, [email]);
+
   return (
     <KeyboardAvoidingView 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -185,6 +241,17 @@ export default function LoginScreen() {
             ) : (
               <Text style={styles.buttonText}>{t('login')}</Text>
             )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            testID="auth-login-resend-confirmation"
+            style={[styles.linkButton, (isLoading || isResending) && styles.linkButtonDisabled]}
+            onPress={handleResendConfirmation}
+            disabled={isLoading || isResending}
+          >
+            <Text style={styles.linkText}>
+              {isResending ? 'Resending…' : 'Resend confirmation email'}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -260,5 +327,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     textTransform: 'uppercase',
+  },
+  linkButton: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  linkButtonDisabled: {
+    opacity: 0.6,
+  },
+  linkText: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
