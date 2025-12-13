@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as LucideIcons from 'lucide-react-native';
+import { GraduationCap, HelpCircle, Stethoscope, Sunset, TrendingUp } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useI18nStore, getLocalized } from '@/constants/i18n';
 import { useDataStore } from '@/store/dataStore';
@@ -18,8 +18,14 @@ export default function ServiceCategories() {
   }, []);
 
   const renderItem = ({ item }: { item: typeof services[0] }) => {
-    // @ts-ignore
-    const Icon = LucideIcons[item.icon] || LucideIcons.HelpCircle;
+    const iconMap = {
+      Sunset,
+      Stethoscope,
+      GraduationCap,
+      TrendingUp,
+    } as const;
+
+    const Icon = iconMap[item.icon as keyof typeof iconMap] ?? HelpCircle;
     
     return (
       <TouchableOpacity

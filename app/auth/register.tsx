@@ -16,7 +16,7 @@ import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { useDataStore } from '@/store/dataStore';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, supabaseConnectionCheck } from '@/lib/supabase/client';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -24,9 +24,16 @@ export default function RegisterScreen() {
   const { appContent, initData } = useDataStore();
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const language = useI18nStore((state) => state.language);
 
   useEffect(() => {
     (async () => {
+      try {
+        await supabaseConnectionCheck();
+      } catch (e) {
+        console.error('[auth/register] supabaseConnectionCheck failed (non-blocking)', e);
+      }
+
       try {
         await initData();
       } catch (e) {
@@ -75,6 +82,29 @@ export default function RegisterScreen() {
         return;
       }
 
+      if (!data.user) {
+        Alert.alert('Registration failed', 'No user returned. Please try again.');
+        return;
+      }
+
+      const insertRes = await supabase.from('profiles').insert({
+        id: data.user.id,
+        full_name: formData.name || null,
+        phone: formData.phone || null,
+        preferred_language: language,
+        role: 'customer',
+      });
+
+      console.log('[auth/register] profiles insert result', {
+        ok: !insertRes.error,
+        error: insertRes.error?.message,
+      });
+
+      if (insertRes.error) {
+        Alert.alert('Profile setup failed', insertRes.error.message);
+        return;
+      }
+
       if (data.session) {
         router.replace('/(tabs)/home');
         return;
@@ -88,7 +118,7 @@ export default function RegisterScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [formData.email, formData.password, router]);
+  }, [formData.email, formData.password, formData.name, formData.phone, language, router]);
 
   return (
     <KeyboardAvoidingView 
@@ -110,6 +140,7 @@ export default function RegisterScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('fullName')}</Text>
             <TextInput
+              testID="auth-register-full-name"
               style={styles.input}
               value={formData.name}
               onChangeText={(v) => handleChange('name', v)}
@@ -121,6 +152,7 @@ export default function RegisterScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('email')}</Text>
             <TextInput
+              testID="auth-register-email"
               style={styles.input}
               value={formData.email}
               onChangeText={(v) => handleChange('email', v)}
@@ -134,6 +166,7 @@ export default function RegisterScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('phone')}</Text>
             <TextInput
+              testID="auth-register-phone"
               style={styles.input}
               value={formData.phone}
               onChangeText={(v) => handleChange('phone', v)}
@@ -146,6 +179,7 @@ export default function RegisterScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('country')}</Text>
             <TextInput
+              testID="auth-register-country"
               style={styles.input}
               value={formData.country}
               onChangeText={(v) => handleChange('country', v)}
@@ -157,6 +191,7 @@ export default function RegisterScreen() {
            <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('nationality')}</Text>
             <TextInput
+              testID="auth-register-nationality"
               style={styles.input}
               value={formData.nationality}
               onChangeText={(v) => handleChange('nationality', v)}
@@ -168,6 +203,7 @@ export default function RegisterScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('password')}</Text>
             <TextInput
+              testID="auth-register-password"
               style={styles.input}
               value={formData.password}
               onChangeText={(v) => handleChange('password', v)}
@@ -177,8 +213,9 @@ export default function RegisterScreen() {
             />
           </View>
 
-          <TouchableOpacity 
-            style={styles.button} 
+          <TouchableOpacity
+            testID="auth-register-submit"
+            style={styles.button}
             onPress={handleRegister}
             disabled={isLoading || !formData.email || !formData.password}
           >

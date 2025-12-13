@@ -16,7 +16,8 @@ import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { useDataStore } from '@/store/dataStore';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, supabaseConnectionCheck } from '@/lib/supabase/client';
+import { useProfileStore } from '@/store/profileStore';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -27,8 +28,17 @@ export default function LoginScreen() {
   const [password, setPassword] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
+  const setProfile = useProfileStore((s) => s.setProfile);
+  const clearProfile = useProfileStore((s) => s.clearProfile);
+
   useEffect(() => {
     (async () => {
+      try {
+        await supabaseConnectionCheck();
+      } catch (e) {
+        console.error('[auth/login] supabaseConnectionCheck failed (non-blocking)', e);
+      }
+
       try {
         await initData();
       } catch (e) {
@@ -54,10 +64,32 @@ export default function LoginScreen() {
         return;
       }
 
-      if (!data.session) {
+      if (!data.session || !data.user) {
         Alert.alert('Login failed', 'No session returned. Please try again.');
         return;
       }
+
+      const profileRes = await supabase
+        .from('profiles')
+        .select('id, role, preferred_language')
+        .eq('id', data.user.id)
+        .single();
+
+      console.log('[auth/login] profiles select result', {
+        hasProfile: Boolean(profileRes.data),
+        error: profileRes.error?.message,
+      });
+
+      if (profileRes.error) {
+        clearProfile();
+        Alert.alert('Login failed', `Profile fetch failed: ${profileRes.error.message}`);
+        return;
+      }
+
+      setProfile({
+        role: profileRes.data.role,
+        preferredLanguage: profileRes.data.preferred_language,
+      });
 
       router.replace('/(tabs)/home');
     } catch (e) {
@@ -66,7 +98,7 @@ export default function LoginScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [email, password, router]);
+  }, [email, password, router, setProfile, clearProfile]);
 
   return (
     <KeyboardAvoidingView 
@@ -88,6 +120,7 @@ export default function LoginScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('email')}</Text>
             <TextInput
+              testID="auth-login-email"
               style={styles.input}
               value={email}
               onChangeText={setEmail}
@@ -101,6 +134,7 @@ export default function LoginScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.label}>{t('password')}</Text>
             <TextInput
+              testID="auth-login-password"
               style={styles.input}
               value={password}
               onChangeText={setPassword}
@@ -110,8 +144,9 @@ export default function LoginScreen() {
             />
           </View>
 
-          <TouchableOpacity 
-            style={[styles.button, (!email || !password) && styles.buttonDisabled]} 
+          <TouchableOpacity
+            testID="auth-login-submit"
+            style={[styles.button, (!email || !password) && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={isLoading || !email || !password}
           >

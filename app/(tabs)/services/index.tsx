@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import * as LucideIcons from 'lucide-react-native';
+import { GraduationCap, HelpCircle, Search, Stethoscope, Sunset, TrendingUp } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useI18nStore, getLocalized } from '@/constants/i18n';
 import { useDataStore } from '@/store/dataStore';
@@ -36,8 +36,14 @@ export default function ServicesScreen() {
   });
 
   const renderServiceItem = ({ item }: { item: typeof services[0] }) => {
-    // @ts-ignore
-    const Icon = LucideIcons[item.icon] || LucideIcons.HelpCircle;
+    const iconMap = {
+      Sunset,
+      Stethoscope,
+      GraduationCap,
+      TrendingUp,
+    } as const;
+
+    const Icon = iconMap[item.icon as keyof typeof iconMap] ?? HelpCircle;
     return (
       <TouchableOpacity
         style={styles.serviceCard}
@@ -64,7 +70,7 @@ export default function ServicesScreen() {
       </View>
 
       <View style={styles.searchContainer}>
-        <LucideIcons.Search color={Colors.textSecondary} size={20} />
+        <Search color={Colors.textSecondary} size={20} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search services..."
