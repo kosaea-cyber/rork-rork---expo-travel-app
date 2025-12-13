@@ -1,58 +1,82 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ImageBackground, TouchableOpacity, Dimensions, ScrollView, NativeScrollEvent, NativeSyntheticEvent, I18nManager } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ImageBackground,
+  TouchableOpacity,
+  Dimensions,
+  ScrollView,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  I18nManager,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
-import { useI18nStore, getLocalized } from '@/constants/i18n';
+import { useI18nStore, type Language } from '@/constants/i18n';
 import { useDataStore } from '@/store/dataStore';
-import { HeroSlide } from '@/lib/db/types';
-import { FileStorage } from '@/lib/db/files';
+import { supabase } from '@/lib/supabase/client';
 
 const { width } = Dimensions.get('window');
 const SLIDER_HEIGHT = 500;
 
-function HeroSlideItem({ slide, language, isRTL, router }: { slide: HeroSlide, language: any, isRTL: boolean, router: any }) {
-  const [uri, setUri] = useState<string | null>(null);
+type HeroSlideRow = {
+  id: string;
+  image_url: string;
+  title_en: string | null;
+  title_ar: string | null;
+  title_de: string | null;
+  subtitle_en: string | null;
+  subtitle_ar: string | null;
+  subtitle_de: string | null;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+};
 
-  useEffect(() => {
-    const load = async () => {
-      const u = await FileStorage.resolve(slide.imageUrl);
-      setUri(u);
-    };
-    load();
-  }, [slide.imageUrl]);
+function getLocalizedDbField(row: HeroSlideRow, field: 'title' | 'subtitle', lang: Language): string {
+  const key = `${field}_${lang}` as const;
+  const fallbackEn = `${field}_en` as const;
+  const value = row[key as keyof HeroSlideRow];
+  if (typeof value === 'string' && value.length > 0) return value;
+  const en = row[fallbackEn as keyof HeroSlideRow];
+  if (typeof en === 'string' && en.length > 0) return en;
+  return '';
+}
 
-  if (!uri) return <View style={[styles.slide, { backgroundColor: '#1a1a1a' }]} />;
+function HeroSlideItem({
+  slide,
+  language,
+  isRTL,
+  router,
+}: {
+  slide: HeroSlideRow;
+  language: Language;
+  isRTL: boolean;
+  router: ReturnType<typeof useRouter>;
+}) {
+  const title = useMemo(() => getLocalizedDbField(slide, 'title', language), [slide, language]);
+  const subtitle = useMemo(() => getLocalizedDbField(slide, 'subtitle', language), [slide, language]);
 
   return (
     <View style={styles.slide}>
-      <ImageBackground
-        source={{ uri }}
-        style={styles.image}
-        resizeMode="cover"
-      >
+      <ImageBackground source={{ uri: slide.image_url }} style={styles.image} resizeMode="cover">
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.2)', 'rgba(10, 25, 47, 0.95)']}
           style={styles.gradient}
         >
           <View style={[styles.content, isRTL && styles.contentRTL]}>
-            <Text style={[styles.title, isRTL && styles.textRTL]}>
-              {getLocalized(slide.title, language)}
+            <Text style={[styles.title, isRTL && styles.textRTL]} numberOfLines={3}>
+              {title}
             </Text>
-            <Text style={[styles.subtitle, isRTL && styles.textRTL]}>
-              {getLocalized(slide.subtitle, language)}
+            <Text style={[styles.subtitle, isRTL && styles.textRTL]} numberOfLines={4}>
+              {subtitle}
             </Text>
-            <TouchableOpacity
-              style={[styles.button, isRTL && styles.buttonRTL]}
-              onPress={() => {
-                  if (slide.ctaLink && slide.ctaLink.startsWith('/')) {
-                       router.push(slide.ctaLink as any);
-                  }
-              }}
-            >
-              <Text style={styles.buttonText}>
-                {getLocalized(slide.ctaLabel, language)}
-              </Text>
+
+            <TouchableOpacity testID={`hero-slide-${slide.id}-cta`} style={[styles.button, isRTL && styles.buttonRTL]} onPress={() => router.push('/(tabs)/services')}>
+              <Text style={styles.buttonText}>Explore</Text>
             </TouchableOpacity>
           </View>
         </LinearGradient>
@@ -63,46 +87,66 @@ function HeroSlideItem({ slide, language, isRTL, router }: { slide: HeroSlide, l
 
 export default function Hero() {
   const router = useRouter();
-  const { appContent, initData } = useDataStore();
   const language = useI18nStore((state) => state.language);
+  const { appContent, initData } = useDataStore();
+
   const scrollViewRef = useRef<ScrollView>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [heroBg, setHeroBg] = useState<string | null>(null);
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [slides, setSlides] = useState<HeroSlideRow[]>([]);
+  const [slidesLoading, setSlidesLoading] = useState<boolean>(true);
+  const [slidesError, setSlidesError] = useState<string | null>(null);
 
   useEffect(() => {
     initData();
+  }, [initData]);
+
+  const loadSlides = useCallback(async () => {
+    setSlidesLoading(true);
+    setSlidesError(null);
+
+    try {
+      const res = await supabase
+        .from('hero_slides')
+        .select('*')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true });
+
+      console.log('[hero] hero_slides query', {
+        count: res.data?.length ?? 0,
+        error: res.error?.message ?? null,
+      });
+
+      if (res.error) {
+        setSlides([]);
+        setSlidesError(res.error.message);
+        return;
+      }
+
+      setSlides((res.data ?? []) as HeroSlideRow[]);
+    } catch (e) {
+      console.error('[hero] hero_slides query unexpected error', e);
+      setSlides([]);
+      setSlidesError('Failed to load hero slides.');
+    } finally {
+      setSlidesLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (appContent?.images?.heroBackground) {
-        FileStorage.resolve(appContent.images.heroBackground).then(setHeroBg);
-    }
-  }, [appContent]);
+    loadSlides();
+  }, [loadSlides]);
 
-  // Filter active slides and sort by order
-  const slides = (appContent?.heroSlides || [])
-    .filter(s => s.isActive)
-    .sort((a, b) => a.order - b.order);
-
-  // Fallback to legacy single hero if no slides exist
   const hasSlides = slides.length > 0;
-  
-  // Auto-play logic
+  const isRTL = language === 'ar';
+
   useEffect(() => {
     if (!hasSlides) return;
-    
+
     const interval = setInterval(() => {
-      let nextIndex = currentIndex + 1;
-      if (nextIndex >= slides.length) {
-        nextIndex = 0;
-      }
-      
-      scrollViewRef.current?.scrollTo({
-        x: nextIndex * width,
-        animated: true,
-      });
+      const nextIndex = currentIndex + 1 >= slides.length ? 0 : currentIndex + 1;
+      scrollViewRef.current?.scrollTo({ x: nextIndex * width, animated: true });
       setCurrentIndex(nextIndex);
-    }, 5000); // 5 seconds
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [currentIndex, hasSlides, slides.length]);
@@ -110,34 +154,39 @@ export default function Hero() {
   const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const contentOffsetX = event.nativeEvent.contentOffset.x;
     const index = Math.round(contentOffsetX / width);
-    if (index !== currentIndex) {
-      setCurrentIndex(index);
-    }
+    if (index !== currentIndex) setCurrentIndex(index);
   };
 
-  const isRTL = language === 'ar';
-
   if (!hasSlides) {
-    // Legacy Single Hero View (Fallback)
     return (
       <View style={styles.container}>
         <ImageBackground
-          source={{ uri: heroBg || 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80' }}
+          source={{
+            uri:
+              appContent?.images?.heroBackground ||
+              'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
+          }}
           style={styles.image}
         >
-          <LinearGradient
-            colors={['transparent', 'rgba(10, 25, 47, 0.9)']}
-            style={styles.gradient}
-          >
+          <LinearGradient colors={['transparent', 'rgba(10, 25, 47, 0.9)']} style={styles.gradient}>
             <View style={[styles.content, isRTL && styles.contentRTL]}>
-              <Text style={[styles.title, isRTL && styles.textRTL]}>{getLocalized(appContent.hero.title, language)}</Text>
-              <Text style={[styles.subtitle, isRTL && styles.textRTL]}>{getLocalized(appContent.hero.subtitle, language)}</Text>
-              <TouchableOpacity
-                style={styles.button}
-                onPress={() => router.push('/(tabs)/services')}
-              >
-                <Text style={styles.buttonText}>{getLocalized(appContent.hero.buttonText, language)}</Text>
+              <Text style={[styles.title, isRTL && styles.textRTL]}>{appContent ? appContent.hero.title[language] : ''}</Text>
+              <Text style={[styles.subtitle, isRTL && styles.textRTL]}>{appContent ? appContent.hero.subtitle[language] : ''}</Text>
+
+              <TouchableOpacity testID="hero-fallback-cta" style={styles.button} onPress={() => router.push('/(tabs)/services')}>
+                <Text style={styles.buttonText}>{appContent ? appContent.hero.buttonText[language] : 'Explore'}</Text>
               </TouchableOpacity>
+
+              {slidesLoading ? (
+                <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <ActivityIndicator color={Colors.tint} />
+                  <Text style={{ color: '#cfd8e3' }}>Loading slides…</Text>
+                </View>
+              ) : slidesError ? (
+                <TouchableOpacity testID="hero-retry" onPress={loadSlides} style={{ marginTop: 12 }}>
+                  <Text style={{ color: Colors.tint, fontWeight: '700' }}>Retry</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </LinearGradient>
         </ImageBackground>
@@ -158,26 +207,13 @@ export default function Hero() {
         style={{ flexDirection: I18nManager.isRTL ? 'row-reverse' : 'row' }}
       >
         {slides.map((slide) => (
-          <HeroSlideItem 
-            key={slide.id} 
-            slide={slide} 
-            language={language} 
-            isRTL={isRTL} 
-            router={router} 
-          />
+          <HeroSlideItem key={slide.id} slide={slide} language={language} isRTL={isRTL} router={router} />
         ))}
       </ScrollView>
 
-      {/* Dots Indicator */}
       <View style={styles.pagination}>
         {slides.map((_, index) => (
-          <View
-            key={index}
-            style={[
-              styles.dot,
-              currentIndex === index && styles.activeDot
-            ]}
-          />
+          <View key={index} style={[styles.dot, currentIndex === index && styles.activeDot]} />
         ))}
       </View>
     </View>
@@ -202,12 +238,12 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'flex-end',
     padding: 24,
-    paddingBottom: 60, 
+    paddingBottom: 60,
   },
   content: {
     gap: 16,
     maxWidth: width * 0.9,
-    alignItems: 'flex-start', 
+    alignItems: 'flex-start',
   },
   contentRTL: {
     alignItems: 'flex-end',
@@ -248,9 +284,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 5,
   },
-  buttonRTL: {
-     // button itself doesn't need RTL change if text is centered, but position is handled by contentRTL
-  },
+  buttonRTL: {},
   buttonText: {
     color: Colors.background,
     fontSize: 16,

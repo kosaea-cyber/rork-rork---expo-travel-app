@@ -1,21 +1,20 @@
 import { Stack, useRouter } from 'expo-router';
-import { useAuthStore } from '@/store/authStore';
 import { useEffect } from 'react';
 import Colors from '@/constants/colors';
-import { TouchableOpacity, Text } from 'react-native';
 import HeaderLogo from '@/components/HeaderLogo';
+import { useProfileStore } from '@/store/profileStore';
 
 export default function AdminLayout() {
-  const { isAdmin, user } = useAuthStore();
+  const role = useProfileStore((s) => s.role);
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (role !== 'admin') {
       router.replace('/auth/login');
     }
-  }, [isAdmin]);
+  }, [role, router]);
 
-  if (!isAdmin) return null;
+  if (role !== 'admin') return null;
 
   return (
     <Stack
