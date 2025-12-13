@@ -48,10 +48,14 @@ export default function LoginScreen() {
   }, [initData]);
 
   const handleLogin = useCallback(async () => {
+    console.log('[login] pressed');
+    console.log('[login] email', email);
+
     if (!email || !password) return;
 
     setIsLoading(true);
     try {
+      console.log('[login] starting signInWithPassword');
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       console.log('[auth/login] signInWithPassword result', {
         hasSession: Boolean(data.session),
@@ -68,6 +72,8 @@ export default function LoginScreen() {
         Alert.alert('Login failed', 'No session returned. Please try again.');
         return;
       }
+
+      console.log('[login] success user id', data.user.id);
 
       const fetchProfile = async () => {
         const res = await supabase
@@ -112,6 +118,8 @@ export default function LoginScreen() {
         role: profileRes.data.role,
         preferredLanguage: profileRes.data.preferred_language,
       });
+
+      console.log('[login] role from profiles', profileRes.data.role);
 
       router.replace('/(tabs)/home');
     } catch (e) {
