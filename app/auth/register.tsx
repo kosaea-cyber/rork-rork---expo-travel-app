@@ -1,24 +1,48 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, ImageBackground } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  ImageBackground,
+  Alert,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
-import { useAuthStore } from '@/store/authStore';
 import { useDataStore } from '@/store/dataStore';
-import { Language } from '@/lib/db/types';
+import { supabase } from '@/lib/supabase/client';
 
 export default function RegisterScreen() {
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
-  const register = useAuthStore((state) => state.register);
-  const isLoading = useAuthStore((state) => state.isLoading);
   const { appContent, initData } = useDataStore();
 
-  React.useEffect(() => {
-    initData();
-  }, []);
-  
-  const [formData, setFormData] = useState({
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await initData();
+      } catch (e) {
+        console.error('[auth/register] initData failed (non-blocking)', e);
+      }
+    })();
+  }, [initData]);
+
+  const [formData, setFormData] = useState<{ 
+    name: string;
+    email: string;
+    phone: string;
+    password: string;
+    country: string;
+    nationality: string;
+  }>({
     name: '',
     email: '',
     phone: '',
@@ -27,25 +51,44 @@ export default function RegisterScreen() {
     nationality: '',
   });
 
-  const handleChange = (key: string, value: string) => {
-    setFormData(prev => ({ ...prev, [key]: value }));
+  const handleChange = (key: keyof typeof formData, value: string) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleRegister = async () => {
-    // Basic validation
-    if (!formData.email || !formData.password || !formData.name) return;
-    
-    await register({
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      country: formData.country,
-      nationality: formData.nationality,
-      preferredLanguage: 'en', // Default
-      avatar: undefined // Optional
-    }, formData.password);
-    router.replace('/(tabs)/home');
-  };
+  const handleRegister = useCallback(async () => {
+    if (!formData.email || !formData.password) return;
+
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+      });
+      console.log('[auth/register] signUp result', {
+        hasUser: Boolean(data.user),
+        hasSession: Boolean(data.session),
+        error: error?.message,
+      });
+
+      if (error) {
+        Alert.alert('Registration failed', error.message);
+        return;
+      }
+
+      if (data.session) {
+        router.replace('/(tabs)/home');
+        return;
+      }
+
+      Alert.alert('Check your email', 'Please confirm your email address to finish signing up.');
+      router.replace('/auth/login');
+    } catch (e) {
+      console.error('[auth/register] unexpected error', e);
+      Alert.alert('Registration failed', 'Unexpected error. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [formData.email, formData.password, router]);
 
   return (
     <KeyboardAvoidingView 
@@ -137,7 +180,7 @@ export default function RegisterScreen() {
           <TouchableOpacity 
             style={styles.button} 
             onPress={handleRegister}
-            disabled={isLoading}
+            disabled={isLoading || !formData.email || !formData.password}
           >
             {isLoading ? (
               <ActivityIndicator color={Colors.background} />

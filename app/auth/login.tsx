@@ -1,38 +1,72 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, ImageBackground } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  ImageBackground,
+  Alert,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
-import { useAuthStore } from '@/store/authStore';
 import { useDataStore } from '@/store/dataStore';
+import { supabase } from '@/lib/supabase/client';
 
 export default function LoginScreen() {
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
-  const login = useAuthStore((state) => state.login);
-  const isLoading = useAuthStore((state) => state.isLoading);
   const { appContent, initData } = useDataStore();
 
-  React.useEffect(() => {
-    initData();
-  }, []);
-  
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  const handleLogin = async () => {
-    if (!email || !password) return;
-    const success = await login(email, password);
-    if (success) {
-      // Check if admin to redirect
-      const isAdmin = useAuthStore.getState().isAdmin;
-      if (isAdmin) {
-        router.replace('/admin');
-      } else {
-        router.replace('/(tabs)/home');
+  useEffect(() => {
+    (async () => {
+      try {
+        await initData();
+      } catch (e) {
+        console.error('[auth/login] initData failed (non-blocking)', e);
       }
+    })();
+  }, [initData]);
+
+  const handleLogin = useCallback(async () => {
+    if (!email || !password) return;
+
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      console.log('[auth/login] signInWithPassword result', {
+        hasSession: Boolean(data.session),
+        hasUser: Boolean(data.user),
+        error: error?.message,
+      });
+
+      if (error) {
+        Alert.alert('Login failed', error.message);
+        return;
+      }
+
+      if (!data.session) {
+        Alert.alert('Login failed', 'No session returned. Please try again.');
+        return;
+      }
+
+      router.replace('/(tabs)/home');
+    } catch (e) {
+      console.error('[auth/login] unexpected error', e);
+      Alert.alert('Login failed', 'Unexpected error. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [email, password, router]);
 
   return (
     <KeyboardAvoidingView 
