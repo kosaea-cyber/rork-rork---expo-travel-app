@@ -69,17 +69,29 @@ export default function LoginScreen() {
         return;
       }
 
-      const profileRes = await supabase
-        .from('profiles')
-        .select('id, role, preferred_language')
-        .eq('id', data.user.id)
-        .maybeSingle();
+      const fetchProfile = async () => {
+        const res = await supabase
+          .from('profiles')
+          .select('id, role, preferred_language')
+          .eq('id', data.user.id)
+          .maybeSingle();
 
-      console.log('[auth/login] profiles select result', {
-        hasProfile: Boolean(profileRes.data),
-        error: profileRes.error?.message,
-        code: (profileRes.error as { code?: string } | null)?.code,
-      });
+        console.log('[auth/login] profiles select result', {
+          hasProfile: Boolean(res.data),
+          error: res.error?.message,
+          code: (res.error as { code?: string } | null)?.code,
+        });
+
+        return res;
+      };
+
+      let profileRes = await fetchProfile();
+
+      if (!profileRes.data && !profileRes.error) {
+        console.log('[auth/login] profile missing; retrying once in 1000ms');
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+        profileRes = await fetchProfile();
+      }
 
       if (profileRes.error) {
         clearProfile();
@@ -90,8 +102,8 @@ export default function LoginScreen() {
       if (!profileRes.data) {
         clearProfile();
         Alert.alert(
-          'Almost there',
-          'Your profile is still being created. Please wait a moment and try logging in again.'
+          'Profile not ready',
+          'We could not find your profile yet. Please wait a moment and try again.'
         );
         return;
       }

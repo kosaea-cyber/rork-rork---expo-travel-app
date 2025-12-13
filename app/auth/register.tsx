@@ -87,10 +87,7 @@ export default function RegisterScreen() {
         return;
       }
 
-      Alert.alert(
-        'Account created',
-        'Account created. Please check your email if confirmation is enabled, then login.'
-      );
+      Alert.alert('Account created', 'Account created. Please login now.');
       router.replace('/auth/login');
     } catch (e) {
       console.error('[auth/register] unexpected error', e);
