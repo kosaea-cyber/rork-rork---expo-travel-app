@@ -1,13 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
 import { Upload } from 'lucide-react-native';
 import Colors from '@/constants/colors';
-import { useDataStore } from '@/store/dataStore';
 import { AsyncImage } from '@/components/AsyncImage';
+import { supabase } from '@/lib/supabase/client';
+import { pickAndUploadImage } from '@/lib/supabase/storageUpload';
 
-function ImageInput({ label, value, onChange, onPickImage, uploading }: { label: string, value: string, onChange: (text: string) => void, onPickImage: () => void, uploading?: boolean }) {
+function ImageInput({
+  label,
+  value,
+  onChange,
+  onPickImage,
+  uploading,
+}: {
+  label: string;
+  value: string;
+  onChange: (text: string) => void;
+  onPickImage: () => void;
+  uploading?: boolean;
+}) {
   return (
     <View style={styles.inputContainer}>
       <Text style={styles.label}>{label}</Text>
@@ -34,98 +46,135 @@ function ImageInput({ label, value, onChange, onPickImage, uploading }: { label:
   );
 }
 
+type AppImageKey = 'heroBackground' | 'welcomeBackground' | 'authBackground' | 'logoUrl';
+
+type AppImagesState = Record<AppImageKey, string>;
+
+const IMAGE_KEYS: AppImageKey[] = ['heroBackground', 'welcomeBackground', 'authBackground', 'logoUrl'];
+
 export default function ManageImages() {
   const router = useRouter();
-  const { appContent, initData, updateAppContent } = useDataStore();
-  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
-  
-  const [images, setImages] = useState(appContent?.images || {
+  const [uploadingKey, setUploadingKey] = useState<AppImageKey | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
+
+  const [images, setImages] = useState<AppImagesState>({
     heroBackground: '',
     welcomeBackground: '',
     authBackground: '',
-    logoUrl: ''
+    logoUrl: '',
   });
 
-  useEffect(() => {
-    initData();
+  const fetchImages = useCallback(async () => {
+    try {
+      console.log('[admin/images] fetching app_images');
+      setLoading(true);
+
+      const res = await supabase.from('app_images').select('key,url').in('key', IMAGE_KEYS);
+
+      console.log('[admin/images] fetch result', {
+        count: res.data?.length ?? 0,
+        error: res.error?.message ?? null,
+      });
+
+      if (res.error) throw new Error(res.error.message);
+
+      const next: AppImagesState = {
+        heroBackground: '',
+        welcomeBackground: '',
+        authBackground: '',
+        logoUrl: '',
+      };
+
+      for (const row of res.data ?? []) {
+        const k = row.key as AppImageKey;
+        if (IMAGE_KEYS.includes(k)) {
+          next[k] = (row.url as string) ?? '';
+        }
+      }
+
+      setImages(next);
+    } catch (e) {
+      console.error('[admin/images] fetch failed', e);
+      Alert.alert('Error', 'Failed to load images from database.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (appContent?.images) {
-      setImages(appContent.images);
-    }
-  }, [appContent]);
+    fetchImages();
+  }, [fetchImages]);
 
-  const handleSave = async () => {
+  const updateImage = useCallback((key: AppImageKey, value: string) => {
+    setImages((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }, []);
+
+  const handleSave = useCallback(async () => {
     try {
-      await updateAppContent({ images });
+      setSaving(true);
+      console.log('[admin/images] saving app_images', images);
+
+      const payload = IMAGE_KEYS.map((key) => ({
+        key,
+        url: images[key] || null,
+      }));
+
+      const res = await supabase.from('app_images').upsert(payload, { onConflict: 'key' }).select('key,url');
+
+      console.log('[admin/images] save result', {
+        count: res.data?.length ?? 0,
+        error: res.error?.message ?? null,
+      });
+
+      if (res.error) throw new Error(res.error.message);
+
       Alert.alert('Success', 'Images updated successfully');
       router.back();
     } catch (e) {
-      console.error(e);
-      Alert.alert('Error', 'Failed to save images');
+      console.error('[admin/images] save failed', e);
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save images');
+    } finally {
+      setSaving(false);
     }
-  };
+  }, [images, router]);
 
-  const updateImage = (key: keyof typeof images, value: string) => {
-    setImages(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  };
-
-  const pickImage = async (key: keyof typeof images) => {
+  const pickImage = useCallback(async (key: AppImageKey) => {
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-      });
+      console.log('[admin/images] pickImage pressed', { key });
+      setUploadingKey(key);
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        setUploadingKey(key);
-        const asset = result.assets[0];
-        
-        const formData = new FormData();
-        formData.append('file', {
-            uri: asset.uri,
-            name: asset.fileName || `${key}.jpg`,
-            type: asset.mimeType || 'image/jpeg'
-        } as any);
-
-        const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL || 'http://localhost:8081';
-        const res = await fetch(`${baseUrl}/api/upload`, {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'Content-Type': 'multipart/form-data',
-            }
-        });
-        
-        if (!res.ok) throw new Error('Upload failed');
-        const data = await res.json();
-        const fullUrl = `${baseUrl}${data.url}`;
-        
-        updateImage(key, fullUrl);
+      const uploaded = await pickAndUploadImage({ folder: 'app-images' });
+      if (!uploaded) {
         setUploadingKey(null);
+        return;
       }
-    } catch (error) {
-      setUploadingKey(null);
-      console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image');
-    }
-  };
 
-  if (!images) {
-      return (
-          <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-              <Text>Loading...</Text>
-          </View>
-      );
+      updateImage(key, uploaded.publicUrl);
+    } catch (e) {
+      console.error('[admin/images] upload failed', e);
+      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again');
+    } finally {
+      setUploadingKey(null);
+    }
+  }, [updateImage]);
+
+  const isBusy = useMemo(() => loading || saving, [loading, saving]);
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]} testID="admin-images-loading">
+        <ActivityIndicator />
+        <Text style={{ marginTop: 10 }}>Loading...</Text>
+      </View>
+    );
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} testID="admin-images-scroll">
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>App Backgrounds & Images</Text>
         
@@ -163,8 +212,8 @@ export default function ManageImages() {
 
       </View>
 
-      <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-        <Text style={styles.saveButtonText}>Save All Changes</Text>
+      <TouchableOpacity style={[styles.saveButton, isBusy ? { opacity: 0.7 } : null]} onPress={handleSave} disabled={isBusy} testID="admin-images-save">
+        <Text style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save All Changes'}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
