@@ -15,8 +15,8 @@ import {
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
-import { useI18nStore, type Language } from '@/constants/i18n';
-import { useDataStore } from '@/store/dataStore';
+import { useProfileStore } from '@/store/profileStore';
+import { type Language } from '@/constants/i18n';
 import { supabase } from '@/lib/supabase/client';
 
 const { width } = Dimensions.get('window');
@@ -60,6 +60,12 @@ function HeroSlideItem({
   const title = useMemo(() => getLocalizedDbField(slide, 'title', language), [slide, language]);
   const subtitle = useMemo(() => getLocalizedDbField(slide, 'subtitle', language), [slide, language]);
 
+  const cta = useMemo(() => {
+    if (language === 'ar') return 'استكشف';
+    if (language === 'de') return 'Entdecken';
+    return 'Explore';
+  }, [language]);
+
   return (
     <View style={styles.slide}>
       <ImageBackground source={{ uri: slide.image_url }} style={styles.image} resizeMode="cover">
@@ -76,7 +82,7 @@ function HeroSlideItem({
             </Text>
 
             <TouchableOpacity testID={`hero-slide-${slide.id}-cta`} style={[styles.button, isRTL && styles.buttonRTL]} onPress={() => router.push('/(tabs)/services')}>
-              <Text style={styles.buttonText}>Explore</Text>
+              <Text style={styles.buttonText}>{cta}</Text>
             </TouchableOpacity>
           </View>
         </LinearGradient>
@@ -87,8 +93,8 @@ function HeroSlideItem({
 
 export default function Hero() {
   const router = useRouter();
-  const language = useI18nStore((state) => state.language);
-  const { appContent, initData } = useDataStore();
+  const preferredLanguage = useProfileStore((state) => state.preferredLanguage);
+  const language = (preferredLanguage ?? 'en') as Language;
 
   const scrollViewRef = useRef<ScrollView>(null);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -96,9 +102,6 @@ export default function Hero() {
   const [slidesLoading, setSlidesLoading] = useState<boolean>(true);
   const [slidesError, setSlidesError] = useState<string | null>(null);
 
-  useEffect(() => {
-    initData();
-  }, [initData]);
 
   const loadSlides = useCallback(async () => {
     setSlidesLoading(true);
@@ -158,34 +161,63 @@ export default function Hero() {
   };
 
   if (!hasSlides) {
+    const fallbackCopy: Record<Language, { title: string; subtitle: string; button: string; loading: string; error: string; retry: string }> = {
+      en: {
+        title: 'Premium airport services, made effortless.',
+        subtitle: 'Fast-track arrivals, VIP meet & assist, lounges, and seamless transfers—book in minutes.',
+        button: 'Explore',
+        loading: 'Loading slides…',
+        error: 'Could not load hero slides.',
+        retry: 'Retry',
+      },
+      ar: {
+        title: 'خدمات مطار مميزة… بكل سهولة.',
+        subtitle: 'استقبال ومرافقة كبار الشخصيات، مسارات سريعة، صالات، وتنقلات سلسة—احجز خلال دقائق.',
+        button: 'استكشف',
+        loading: 'جاري تحميل الشرائح…',
+        error: 'تعذر تحميل شرائح الواجهة.',
+        retry: 'إعادة المحاولة',
+      },
+      de: {
+        title: 'Premium-Flughafenservices – ganz unkompliziert.',
+        subtitle: 'Fast-Track, VIP Meet & Assist, Lounges und reibungslose Transfers – in wenigen Minuten buchen.',
+        button: 'Entdecken',
+        loading: 'Slides werden geladen…',
+        error: 'Hero-Slides konnten nicht geladen werden.',
+        retry: 'Erneut versuchen',
+      },
+    };
+
+    const copy = fallbackCopy[language] ?? fallbackCopy.en;
+
     return (
       <View style={styles.container}>
-        <ImageBackground
-          source={{
-            uri:
-              appContent?.images?.heroBackground ||
-              'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
-          }}
-          style={styles.image}
-        >
-          <LinearGradient colors={['transparent', 'rgba(10, 25, 47, 0.9)']} style={styles.gradient}>
+        <ImageBackground source={require('@/assets/images/splash-icon.png')} style={styles.image} resizeMode="cover">
+          <LinearGradient colors={['transparent', 'rgba(10, 25, 47, 0.92)']} style={styles.gradient}>
             <View style={[styles.content, isRTL && styles.contentRTL]}>
-              <Text style={[styles.title, isRTL && styles.textRTL]}>{appContent ? appContent.hero.title[language] : ''}</Text>
-              <Text style={[styles.subtitle, isRTL && styles.textRTL]}>{appContent ? appContent.hero.subtitle[language] : ''}</Text>
+              <Text style={[styles.title, isRTL && styles.textRTL]} numberOfLines={3}>
+                {copy.title}
+              </Text>
+              <Text style={[styles.subtitle, isRTL && styles.textRTL]} numberOfLines={4}>
+                {copy.subtitle}
+              </Text>
 
               <TouchableOpacity testID="hero-fallback-cta" style={styles.button} onPress={() => router.push('/(tabs)/services')}>
-                <Text style={styles.buttonText}>{appContent ? appContent.hero.buttonText[language] : 'Explore'}</Text>
+                <Text style={styles.buttonText}>{copy.button}</Text>
               </TouchableOpacity>
 
               {slidesLoading ? (
                 <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <ActivityIndicator color={Colors.tint} />
-                  <Text style={{ color: '#cfd8e3' }}>Loading slides…</Text>
+                  <Text style={{ color: '#cfd8e3' }}>{copy.loading}</Text>
                 </View>
               ) : slidesError ? (
-                <TouchableOpacity testID="hero-retry" onPress={loadSlides} style={{ marginTop: 12 }}>
-                  <Text style={{ color: Colors.tint, fontWeight: '700' }}>Retry</Text>
-                </TouchableOpacity>
+                <View style={{ marginTop: 12, gap: 10 }}>
+                  <Text style={{ color: '#cfd8e3' }}>{copy.error}</Text>
+                  <TouchableOpacity testID="hero-retry" onPress={loadSlides}>
+                    <Text style={{ color: Colors.tint, fontWeight: '700' }}>{copy.retry}</Text>
+                  </TouchableOpacity>
+                </View>
               ) : null}
             </View>
           </LinearGradient>
