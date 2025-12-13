@@ -1,7 +1,6 @@
 import { create } from 'zustand';
-import { trpcVanilla } from '@/lib/trpc';
+import { supabase } from '@/lib/supabase/client';
 import { User } from '@/lib/db/types';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface AuthState {
   user: User | null;
@@ -25,50 +24,74 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   checkAuth: async () => {
     try {
-      const token = await AsyncStorage.getItem('auth_token');
-      if (token) {
-        // Verify token with backend
-        const user = await trpcVanilla.auth.me.query();
-        if (user) {
-          set({ 
-            user: user as User, // Casting because backend might return slightly different struct (no password hash) which matches User interface mostly
-            isAdmin: user.role === 'admin',
-            isGuest: false,
-            isLoading: false 
-          });
-          return;
-        }
+      console.log('[authStore] checkAuth: using supabase session');
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error('[authStore] getSession error', error);
       }
-      set({ isLoading: false });
+
+      const sessionUser = data.session?.user ?? null;
+      if (!sessionUser) {
+        set({ isLoading: false, user: null, isAdmin: false, isGuest: false });
+        return;
+      }
+
+      const profileRes = await supabase
+        .from('profiles')
+        .select('id, role, preferred_language, full_name, phone')
+        .eq('id', sessionUser.id)
+        .maybeSingle();
+
+      if (profileRes.error) {
+        console.error('[authStore] profiles select error', profileRes.error);
+      }
+
+      const role = (profileRes.data?.role ?? 'customer') as 'admin' | 'customer';
+      const preferredLanguage = (profileRes.data?.preferred_language ?? 'en') as 'en' | 'ar' | 'de';
+
+      const mappedUser: User = {
+        id: sessionUser.id,
+        email: sessionUser.email ?? '',
+        name: profileRes.data?.full_name ?? (sessionUser.email?.split('@')[0] ?? 'User'),
+        role,
+        phone: profileRes.data?.phone ?? undefined,
+        preferredLanguage,
+        createdAt: sessionUser.created_at ?? new Date().toISOString(),
+        status: 'active',
+      };
+
+      set({ user: mappedUser, isAdmin: role === 'admin', isGuest: false, isLoading: false });
     } catch (e) {
-      console.error('Auth check failed', e);
-      // Token might be invalid
-      await AsyncStorage.removeItem('auth_token');
-      set({ isLoading: false, user: null });
+      console.error('[authStore] checkAuth failed', e);
+      set({ isLoading: false, user: null, isAdmin: false, isGuest: false });
     }
   },
 
   login: async (email, password) => {
     set({ isLoading: true });
-    
+
     if (!password) {
-        set({ isLoading: false });
-        return false;
+      set({ isLoading: false });
+      return false;
     }
 
     try {
-      const result = await trpcVanilla.auth.login.mutate({ email, password });
-      
-      await AsyncStorage.setItem('auth_token', result.token);
-      set({ 
-        user: result.user as User, 
-        isAdmin: result.user.role === 'admin', 
-        isGuest: false, 
-        isLoading: false 
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      console.log('[authStore] signInWithPassword result', {
+        hasUser: Boolean(data.user),
+        hasSession: Boolean(data.session),
+        error: error?.message,
       });
+
+      if (error || !data.user) {
+        set({ isLoading: false });
+        return false;
+      }
+
+      await get().checkAuth();
       return true;
     } catch (e) {
-      console.error("Login failed", e);
+      console.error('[authStore] login failed', e);
       set({ isLoading: false });
       return false;
     }
@@ -76,25 +99,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   register: async (userData, password) => {
     set({ isLoading: true });
-    
+
     try {
-      const result = await trpcVanilla.auth.register.mutate({
+      const { data, error } = await supabase.auth.signUp({
         email: userData.email,
-        password: password,
-        name: userData.name,
-        phone: userData.phone,
-        role: "customer" // Default
+        password,
       });
 
-      await AsyncStorage.setItem('auth_token', result.token);
-      set({ 
-        user: result.user as User, 
-        isAdmin: false, 
-        isGuest: false, 
-        isLoading: false 
+      console.log('[authStore] signUp result', {
+        hasUser: Boolean(data.user),
+        hasSession: Boolean(data.session),
+        error: error?.message,
       });
+
+      if (error) {
+        set({ isLoading: false });
+        throw error;
+      }
+
+      set({ isLoading: false });
     } catch (e) {
-      console.error("Register failed", e);
+      console.error('[authStore] register failed', e);
       set({ isLoading: false });
       throw e;
     }
@@ -102,17 +127,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: async () => {
     try {
-        await trpcVanilla.auth.logout.mutate();
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('[authStore] signOut error', error);
+      }
     } catch (e) {
-        // ignore
+      console.error('[authStore] signOut unexpected error', e);
     }
-    await AsyncStorage.removeItem('auth_token');
+
     set({ user: null, isAdmin: false, isGuest: false });
   },
 
   setGuest: async () => {
-    await AsyncStorage.removeItem('auth_token');
-    set({ isGuest: true, user: null, isAdmin: false });
+    set({ isGuest: true, user: null, isAdmin: false, isLoading: false });
   },
 
   updateProfile: async (updates) => {

@@ -6,7 +6,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
 import { initI18n } from "@/constants/i18n";
 import { StatusBar } from "expo-status-bar";
-import { trpc, trpcClient } from "@/lib/trpc";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -20,7 +19,7 @@ export default function RootLayout() {
   useEffect(() => {
     initI18n();
     checkAuth();
-  }, []);
+  }, [checkAuth]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -48,20 +47,18 @@ export default function RootLayout() {
       console.log('Redirecting to Home (Authenticated User in Auth Group)');
       router.replace("/(tabs)/home");
     }
-  }, [user, isGuest, isLoading, segments]);
+  }, [user, isGuest, isLoading, segments, router]);
 
   if (isLoading) {
     return null; // Or a custom splash component
   }
 
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <StatusBar style="light" />
-          <Slot />
-        </GestureHandlerRootView>
-      </QueryClientProvider>
-    </trpc.Provider>
+    <QueryClientProvider client={queryClient}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <StatusBar style="light" />
+        <Slot />
+      </GestureHandlerRootView>
+    </QueryClientProvider>
   );
 }

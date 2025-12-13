@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { trpcVanilla } from '@/lib/trpc';
 import { ServiceCategory, Package, BlogPost, AppSettings, FAQ } from '@/lib/db/types';
+import { MOCK_APP_CONTENT, MOCK_BLOGS, MOCK_FAQ, MOCK_PACKAGES, MOCK_SERVICES } from '@/mocks/data';
 
 interface DataState {
   services: ServiceCategory[];
@@ -64,83 +64,52 @@ export const useDataStore = create<DataState>((set, get) => ({
 
   initData: async () => {
     try {
-      const [services, packages, blogs, settings, faqs, heroSlides] = await Promise.all([
-        trpcVanilla.services.listCategories.query(),
-        trpcVanilla.services.listPackages.query(),
-        trpcVanilla.blog.list.query(),
-        trpcVanilla.settings.get.query(),
-        trpcVanilla.faq.list.query(),
-        trpcVanilla.hero.listSlides.query(),
-      ]);
-      
-      // Merge settings with heroSlides if needed, or backend handles it
-      // Backend returns settings which includes heroSlides, but heroSlides usually managed by hero router
-      // settings.heroSlides might be empty if not synced.
-      // Let's use heroSlides from hero router
-      if (settings) {
-          settings.heroSlides = heroSlides as any;
-      }
-
+      console.log('[dataStore] initData: using local mocks (no TRPC/backend)');
       set({
-        services,
-        packages,
-        blogs,
-        appContent: settings || DEFAULT_SETTINGS,
-        faqs,
+        services: MOCK_SERVICES,
+        packages: MOCK_PACKAGES,
+        blogs: MOCK_BLOGS,
+        faqs: MOCK_FAQ,
+        appContent: MOCK_APP_CONTENT,
         isLoading: false,
       });
     } catch (e) {
-      console.error('Failed to init data from Backend', e);
+      console.error('[dataStore] initData failed (unexpected)', e);
       set({ isLoading: false });
     }
   },
 
-  updateService: async (service) => {
-      await trpcVanilla.services.updateCategory.mutate({ id: service.id, data: service });
-      get().initData();
+  updateService: async () => {
+    throw new Error('Not supported: backend disabled');
   },
-  addService: async (service) => {
-      // transform service to input schema (remove id if creating?)
-      // backend creates ID. 
-      const { id, ...data } = service;
-      await trpcVanilla.services.createCategory.mutate(data);
-      get().initData();
+  addService: async () => {
+    throw new Error('Not supported: backend disabled');
   },
-  deleteService: async (id) => {
-      await trpcVanilla.services.deleteCategory.mutate({ id });
-      get().initData();
+  deleteService: async () => {
+    throw new Error('Not supported: backend disabled');
   },
 
-  updatePackage: async (pkg) => {
-      await trpcVanilla.services.updatePackage.mutate({ id: pkg.id, data: pkg });
-      get().initData();
+  updatePackage: async () => {
+    throw new Error('Not supported: backend disabled');
   },
-  addPackage: async (pkg) => {
-      const { id, ...data } = pkg;
-      await trpcVanilla.services.createPackage.mutate(data);
-      get().initData();
+  addPackage: async () => {
+    throw new Error('Not supported: backend disabled');
   },
-  deletePackage: async (id) => {
-      await trpcVanilla.services.deletePackage.mutate({ id });
-      get().initData();
+  deletePackage: async () => {
+    throw new Error('Not supported: backend disabled');
   },
 
-  updateBlog: async (blog) => {
-      await trpcVanilla.blog.update.mutate({ id: blog.id, data: blog });
-      get().initData();
+  updateBlog: async () => {
+    throw new Error('Not supported: backend disabled');
   },
-  addBlog: async (blog) => {
-      const { id, author, createdAt, ...data } = blog;
-      await trpcVanilla.blog.create.mutate(data);
-      get().initData();
+  addBlog: async () => {
+    throw new Error('Not supported: backend disabled');
   },
-  deleteBlog: async (id) => {
-      await trpcVanilla.blog.delete.mutate({ id });
-      get().initData();
+  deleteBlog: async () => {
+    throw new Error('Not supported: backend disabled');
   },
 
-  updateAppContent: async (updates) => {
-      await trpcVanilla.settings.update.mutate(updates);
-      get().initData();
-  }
+  updateAppContent: async () => {
+    throw new Error('Not supported: backend disabled');
+  },
 }));
