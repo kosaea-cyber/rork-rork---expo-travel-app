@@ -87,30 +87,10 @@ export default function RegisterScreen() {
         return;
       }
 
-      const insertRes = await supabase.from('profiles').insert({
-        id: data.user.id,
-        full_name: formData.name || null,
-        phone: formData.phone || null,
-        preferred_language: language,
-        role: 'customer',
-      });
-
-      console.log('[auth/register] profiles insert result', {
-        ok: !insertRes.error,
-        error: insertRes.error?.message,
-      });
-
-      if (insertRes.error) {
-        Alert.alert('Profile setup failed', insertRes.error.message);
-        return;
-      }
-
-      if (data.session) {
-        router.replace('/(tabs)/home');
-        return;
-      }
-
-      Alert.alert('Check your email', 'Please confirm your email address to finish signing up.');
+      Alert.alert(
+        'Account created',
+        'Account created. Please check your email if confirmation is enabled, then login.'
+      );
       router.replace('/auth/login');
     } catch (e) {
       console.error('[auth/register] unexpected error', e);
@@ -118,7 +98,7 @@ export default function RegisterScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [formData.email, formData.password, formData.name, formData.phone, language, router]);
+  }, [formData.email, formData.password, router]);
 
   return (
     <KeyboardAvoidingView 

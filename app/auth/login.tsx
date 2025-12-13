@@ -73,16 +73,26 @@ export default function LoginScreen() {
         .from('profiles')
         .select('id, role, preferred_language')
         .eq('id', data.user.id)
-        .single();
+        .maybeSingle();
 
       console.log('[auth/login] profiles select result', {
         hasProfile: Boolean(profileRes.data),
         error: profileRes.error?.message,
+        code: (profileRes.error as { code?: string } | null)?.code,
       });
 
       if (profileRes.error) {
         clearProfile();
         Alert.alert('Login failed', `Profile fetch failed: ${profileRes.error.message}`);
+        return;
+      }
+
+      if (!profileRes.data) {
+        clearProfile();
+        Alert.alert(
+          'Almost there',
+          'Your profile is still being created. Please wait a moment and try logging in again.'
+        );
         return;
       }
 
