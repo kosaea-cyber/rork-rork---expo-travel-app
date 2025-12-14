@@ -143,13 +143,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   updateProfile: async (updates) => {
-    // Implement profile update via trpc if endpoint exists
-    // For now just update local state
     const { user } = get();
     if (!user) return;
-    
-    // TODO: Add updateProfile endpoint in auth or users router
-    // const updated = await trpcVanilla.auth.updateProfile.mutate(updates);
+
     set({ user: { ...user, ...updates } });
   }
 }));
