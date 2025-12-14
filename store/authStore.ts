@@ -43,7 +43,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .maybeSingle();
 
       if (profileRes.error) {
-        console.error('[authStore] profiles select error', profileRes.error);
+        const err = profileRes.error as unknown as {
+          message?: string;
+          code?: string;
+          details?: string;
+          hint?: string;
+          status?: number;
+          name?: string;
+        };
+
+        console.error('[authStore] profiles select error', {
+          message: err?.message ?? String(profileRes.error),
+          code: err?.code ?? null,
+          details: err?.details ?? null,
+          hint: err?.hint ?? null,
+          status: err?.status ?? null,
+          name: err?.name ?? null,
+        });
       }
 
       const role = (profileRes.data?.role ?? 'customer') as 'admin' | 'customer';
