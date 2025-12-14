@@ -1,180 +1,504 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, ScrollView, Image } from 'react-native';
-import { useDataStore } from '@/store/dataStore';
-import { Package, LocalizedString } from '@/lib/db/types';
+import React, { useCallback, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Edit2, Plus, Save, Trash2, X } from 'lucide-react-native';
 import Colors from '@/constants/colors';
-import { Plus, Edit2, Trash2, X, Save } from 'lucide-react-native';
-import LocalizedInput from '@/components/admin/LocalizedInput';
+import { supabase } from '@/lib/supabase/client';
+
+type ServiceCategoryRow = {
+  id: string;
+  title_en: string | null;
+  is_active: boolean | null;
+  sort_order: number | null;
+};
+
+type PackageRow = {
+  id: string;
+  category_id: string | null;
+  is_active: boolean | null;
+  sort_order: number | null;
+  title_en: string | null;
+  title_ar: string | null;
+  title_de: string | null;
+  description_en: string | null;
+  description_ar: string | null;
+  description_de: string | null;
+  image_url: string | null;
+  price_amount: number | null;
+  price_currency: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type EditablePackage = {
+  id?: string;
+  category_id: string;
+  is_active: boolean;
+  sort_order: number;
+  title_en: string;
+  title_ar: string;
+  title_de: string;
+  description_en: string;
+  description_ar: string;
+  description_de: string;
+  image_url: string;
+  price_amount: string;
+  price_currency: string;
+};
+
+function normalizePackage(row?: PackageRow | null): EditablePackage {
+  return {
+    id: row?.id,
+    category_id: row?.category_id ?? '',
+    is_active: row?.is_active ?? true,
+    sort_order: row?.sort_order ?? 0,
+    title_en: row?.title_en ?? '',
+    title_ar: row?.title_ar ?? '',
+    title_de: row?.title_de ?? '',
+    description_en: row?.description_en ?? '',
+    description_ar: row?.description_ar ?? '',
+    description_de: row?.description_de ?? '',
+    image_url: row?.image_url ?? '',
+    price_amount: row?.price_amount != null ? String(row.price_amount) : '',
+    price_currency: row?.price_currency ?? 'AED',
+  };
+}
 
 export default function AdminPackages() {
-  const { packages, updatePackage, addPackage, deletePackage } = useDataStore();
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingPackage, setEditingPackage] = useState<Package | null>(null);
+  const queryClient = useQueryClient();
 
+  const [modalVisible, setModalVisible] = useState<boolean>(false);
+  const [editing, setEditing] = useState<EditablePackage | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const handleEdit = (pkg: Package) => {
-    setEditingPackage(pkg);
-    setModalVisible(true);
-  };
+  const categoriesQuery = useQuery({
+    queryKey: ['admin', 'service_categories', 'minimal'],
+    queryFn: async (): Promise<ServiceCategoryRow[]> => {
+      const { data, error } = await supabase
+        .from('service_categories')
+        .select('id, title_en, is_active, sort_order')
+        .order('sort_order', { ascending: true });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as ServiceCategoryRow[];
+    },
+  });
 
-  const handleAdd = () => {
-    setEditingPackage({
-      id: Math.random().toString(36).substr(2, 9),
-      categoryId: 'wellness', // default
-      title: { en: '', ar: '', de: '' },
-      description: { en: '', ar: '', de: '' },
-      duration: { en: '', ar: '', de: '' },
-      price: { en: '', ar: '', de: '' },
-      features: [],
-      included: [],
-      imageUrl: '',
-      isFeatured: false,
+  const packagesQuery = useQuery({
+    queryKey: ['admin', 'packages'],
+    queryFn: async (): Promise<PackageRow[]> => {
+      console.log('[admin/packages] fetching packages');
+      const { data, error } = await supabase
+        .from('packages')
+        .select(
+          'id, category_id, is_active, sort_order, title_en, title_ar, title_de, description_en, description_ar, description_de, image_url, price_amount, price_currency, created_at, updated_at',
+        )
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.log('[admin/packages] fetch error', error);
+        throw new Error(error.message);
+      }
+
+      console.log('[admin/packages] fetched', { count: data?.length ?? 0 });
+      return (data ?? []) as PackageRow[];
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (payload: EditablePackage): Promise<void> => {
+      const priceAmount = payload.price_amount.trim().length ? Number(payload.price_amount) : null;
+      if (payload.price_amount.trim().length && !Number.isFinite(priceAmount)) {
+        throw new Error('Price amount must be a number');
+      }
+
+      const insertRow = {
+        category_id: payload.category_id,
+        is_active: payload.is_active,
+        sort_order: payload.sort_order,
+        title_en: payload.title_en,
+        title_ar: payload.title_ar,
+        title_de: payload.title_de,
+        description_en: payload.description_en,
+        description_ar: payload.description_ar,
+        description_de: payload.description_de,
+        image_url: payload.image_url || null,
+        price_amount: priceAmount,
+        price_currency: payload.price_currency || null,
+      };
+
+      const { error } = await supabase.from('packages').insert(insertRow);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'packages'] });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async (payload: EditablePackage): Promise<void> => {
+      if (!payload.id) throw new Error('Missing package id');
+
+      const priceAmount = payload.price_amount.trim().length ? Number(payload.price_amount) : null;
+      if (payload.price_amount.trim().length && !Number.isFinite(priceAmount)) {
+        throw new Error('Price amount must be a number');
+      }
+
+      const updateRow = {
+        category_id: payload.category_id,
+        is_active: payload.is_active,
+        sort_order: payload.sort_order,
+        title_en: payload.title_en,
+        title_ar: payload.title_ar,
+        title_de: payload.title_de,
+        description_en: payload.description_en,
+        description_ar: payload.description_ar,
+        description_de: payload.description_de,
+        image_url: payload.image_url || null,
+        price_amount: priceAmount,
+        price_currency: payload.price_currency || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase.from('packages').update(updateRow).eq('id', payload.id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'packages'] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      const { error } = await supabase.from('packages').delete().eq('id', id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'packages'] });
+    },
+  });
+
+  const categories = useMemo<ServiceCategoryRow[]>(() => categoriesQuery.data ?? [], [categoriesQuery.data]);
+  const packages = useMemo<PackageRow[]>(() => packagesQuery.data ?? [], [packagesQuery.data]);
+
+  const categoryLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of categories) {
+      map.set(c.id, (c.title_en ?? '').trim() || c.id);
+    }
+    return map;
+  }, [categories]);
+
+  const createPackage = createMutation.mutateAsync;
+  const updatePackage = updateMutation.mutateAsync;
+  const deletePackage = deleteMutation.mutateAsync;
+
+  const openNew = useCallback(() => {
+    setFormError(null);
+    const firstActive = categories.find((c) => c.is_active !== false);
+    setEditing({
+      ...normalizePackage(null),
+      category_id: firstActive?.id ?? '',
     });
     setModalVisible(true);
-  };
+  }, [categories]);
 
-  const handleSave = async () => {
-    if (!editingPackage) return;
-    
-    if (packages.find(p => p.id === editingPackage.id)) {
-      await updatePackage(editingPackage);
-    } else {
-      await addPackage(editingPackage);
-    }
+  const openEdit = useCallback((row: PackageRow) => {
+    setFormError(null);
+    setEditing(normalizePackage(row));
+    setModalVisible(true);
+  }, []);
+
+  const closeModal = useCallback(() => {
     setModalVisible(false);
-    setEditingPackage(null);
-  };
+    setEditing(null);
+    setFormError(null);
+  }, []);
 
-  const handleDelete = async (id: string) => {
-    await deletePackage(id);
-  };
+  const saving = createMutation.isPending || updateMutation.isPending;
 
-  const renderItem = ({ item }: { item: Package }) => (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        {item.imageUrl ? (
-          <Image source={{ uri: item.imageUrl }} style={styles.cardImage} />
-        ) : null}
-        <View style={styles.headerTextContainer}>
-            <Text style={styles.cardTitle}>{item.title.en}</Text>
-            <Text style={styles.price}>{item.price?.en}</Text>
-        </View>
-      </View>
-      <Text style={styles.category}>{item.categoryId}</Text>
-      <Text style={styles.description} numberOfLines={2}>{item.description.en}</Text>
-      
-      <View style={styles.actions}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => handleEdit(item)}>
-          <Edit2 size={20} color={Colors.tint} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => handleDelete(item.id)}>
-          <Trash2 size={20} color={Colors.error} />
-        </TouchableOpacity>
-      </View>
-    </View>
+  const onSave = useCallback(async () => {
+    if (!editing) return;
+
+    if (!editing.category_id.trim()) {
+      setFormError('Category is required (category_id).');
+      return;
+    }
+
+    const payload: EditablePackage = {
+      ...editing,
+      category_id: editing.category_id.trim(),
+      sort_order: Number.isFinite(editing.sort_order) ? editing.sort_order : 0,
+    };
+
+    setFormError(null);
+    try {
+      if (payload.id) {
+        await updatePackage(payload);
+      } else {
+        await createPackage(payload);
+      }
+      closeModal();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to save.';
+      setFormError(message);
+    }
+  }, [closeModal, createPackage, editing, updatePackage]);
+
+  const onDelete = useCallback(
+    async (id: string) => {
+      try {
+        await deletePackage(id);
+      } catch (e) {
+        console.error('[admin/packages] delete failed', e);
+      }
+    },
+    [deletePackage],
   );
 
+  const renderItem = useCallback(
+    ({ item }: { item: PackageRow }) => {
+      const catLabel = item.category_id ? (categoryLabelById.get(item.category_id) ?? item.category_id) : '—';
+      return (
+        <View style={styles.card} testID={`admin-package-card-${item.id}`}>
+          {item.image_url ? <Image source={{ uri: item.image_url }} style={styles.image} /> : null}
+          <View style={styles.content}>
+            <View style={styles.headerRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title} numberOfLines={1}>
+                  {(item.title_en ?? '').trim() || '(UNTITLED)'}
+                </Text>
+                <Text style={styles.meta} numberOfLines={2}>
+                  category: {catLabel}
+                </Text>
+              </View>
+
+              <View style={styles.actions}>
+                <Pressable testID={`admin-package-edit-${item.id}`} onPress={() => openEdit(item)} style={styles.actionBtn}>
+                  <Edit2 size={20} color={Colors.tint} />
+                </Pressable>
+                <Pressable testID={`admin-package-delete-${item.id}`} onPress={() => onDelete(item.id)} style={styles.actionBtn}>
+                  <Trash2 size={20} color={Colors.error} />
+                </Pressable>
+              </View>
+            </View>
+
+            <Text style={styles.meta} numberOfLines={2}>
+              ID: {item.id}
+            </Text>
+          </View>
+        </View>
+      );
+    },
+    [categoryLabelById, onDelete, openEdit],
+  );
+
+  if (packagesQuery.isLoading || categoriesQuery.isLoading) {
+    return (
+      <View style={styles.stateWrap} testID="admin-packages-loading">
+        <ActivityIndicator color={Colors.tint} />
+        <Text style={styles.stateText}>Loading packages…</Text>
+      </View>
+    );
+  }
+
+  if (packagesQuery.isError || categoriesQuery.isError) {
+    const message =
+      (packagesQuery.error instanceof Error ? packagesQuery.error.message : null) ??
+      (categoriesQuery.error instanceof Error ? categoriesQuery.error.message : null) ??
+      'Unknown error';
+
+    return (
+      <View style={styles.stateWrap} testID="admin-packages-error">
+        <Text style={styles.stateText}>Couldn’t load packages.</Text>
+        <Text style={[styles.stateText, { fontWeight: '600' }]}>{message}</Text>
+        <Pressable
+          testID="admin-packages-retry"
+          style={styles.retryBtn}
+          onPress={() => {
+            packagesQuery.refetch();
+            categoriesQuery.refetch();
+          }}
+        >
+          <Text style={styles.retryText}>Retry</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <TouchableOpacity style={styles.addBtn} onPress={handleAdd}>
-        <Plus size={24} color="white" />
-        <Text style={styles.addBtnText}>Add New Package</Text>
-      </TouchableOpacity>
+    <View style={styles.container} testID="admin-packages">
+      <Pressable testID="admin-packages-add" style={styles.addBtn} onPress={openNew}>
+        <Plus size={22} color="white" />
+        <Text style={styles.addBtnText}>Add Package</Text>
+      </Pressable>
 
       <FlatList
         data={packages}
-        keyExtractor={item => item.id}
+        keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={styles.list}
+        ListEmptyComponent={
+          <View style={styles.stateWrap} testID="admin-packages-empty">
+            <Text style={styles.stateText}>No packages yet.</Text>
+            <Pressable
+              testID="admin-packages-empty-retry"
+              style={styles.retryBtn}
+              onPress={() => {
+                packagesQuery.refetch();
+                categoriesQuery.refetch();
+              }}
+            >
+              <Text style={styles.retryText}>Refresh</Text>
+            </Pressable>
+          </View>
+        }
       />
 
-      <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet">
-        <View style={styles.modalContainer}>
+      <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeModal}>
+        <View style={styles.modalContainer} testID="admin-packages-modal">
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
-              {packages.find(p => p.id === editingPackage?.id) ? 'Edit Package' : 'New Package'}
-            </Text>
-            <TouchableOpacity onPress={() => setModalVisible(false)}>
+            <Text style={styles.modalTitle}>{editing?.id ? 'Edit Package' : 'New Package'}</Text>
+            <Pressable testID="admin-packages-modal-close" onPress={closeModal}>
               <X size={24} color="#333" />
-            </TouchableOpacity>
+            </Pressable>
           </View>
 
-          <ScrollView style={styles.form}>
-            {editingPackage && (
+          <ScrollView style={styles.form} contentContainerStyle={{ paddingBottom: 30 }}>
+            {editing ? (
               <>
-                <LocalizedInput
-                  label="Title"
-                  value={editingPackage.title}
-                  onChange={(val) => setEditingPackage({ ...editingPackage, title: val })}
-                />
+                {formError ? <Text style={styles.formError}>{formError}</Text> : null}
 
-                <Text style={styles.label}>Category ID</Text>
+                <Text style={styles.label}>Category</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+                  {categories.map((c) => {
+                    const isSelected = editing.category_id === c.id;
+                    const label = (c.title_en ?? '').trim() || c.id;
+                    return (
+                      <Pressable
+                        key={c.id}
+                        testID={`admin-package-category-${c.id}`}
+                        style={[styles.chip, isSelected && styles.chipActive]}
+                        onPress={() => setEditing({ ...editing, category_id: c.id })}
+                      >
+                        <Text style={[styles.chipText, isSelected && styles.chipTextActive]} numberOfLines={1}>
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+
+                <Text style={styles.label}>Title (EN)</Text>
                 <TextInput
+                  testID="admin-package-title-en"
                   style={styles.input}
-                  value={editingPackage.categoryId}
-                  onChangeText={t => setEditingPackage({ ...editingPackage, categoryId: t })}
+                  value={editing.title_en}
+                  onChangeText={(t) => setEditing({ ...editing, title_en: t })}
                 />
 
-                <LocalizedInput
-                  label="Price"
-                  value={editingPackage.price || {en:'', ar:'', de:''}}
-                  onChange={(val) => setEditingPackage({ ...editingPackage, price: val })}
+                <Text style={styles.label}>Title (AR)</Text>
+                <TextInput
+                  testID="admin-package-title-ar"
+                  style={styles.input}
+                  value={editing.title_ar}
+                  onChangeText={(t) => setEditing({ ...editing, title_ar: t })}
                 />
 
-                <LocalizedInput
-                  label="Duration"
-                  value={editingPackage.duration}
-                  onChange={(val) => setEditingPackage({ ...editingPackage, duration: val })}
+                <Text style={styles.label}>Title (DE)</Text>
+                <TextInput
+                  testID="admin-package-title-de"
+                  style={styles.input}
+                  value={editing.title_de}
+                  onChangeText={(t) => setEditing({ ...editing, title_de: t })}
+                />
+
+                <Text style={styles.label}>Description (EN)</Text>
+                <TextInput
+                  testID="admin-package-desc-en"
+                  style={[styles.input, styles.textArea]}
+                  value={editing.description_en}
+                  onChangeText={(t) => setEditing({ ...editing, description_en: t })}
+                  multiline
                 />
 
                 <Text style={styles.label}>Image URL</Text>
                 <TextInput
+                  testID="admin-package-image-url"
                   style={styles.input}
-                  value={editingPackage.imageUrl || ''}
-                  onChangeText={t => setEditingPackage({ ...editingPackage, imageUrl: t })}
+                  value={editing.image_url}
+                  onChangeText={(t) => setEditing({ ...editing, image_url: t })}
+                  autoCapitalize="none"
                 />
 
-                <LocalizedInput
-                  label="Description"
-                  value={editingPackage.description}
-                  onChange={(val) => setEditingPackage({ ...editingPackage, description: val })}
-                  multiline
-                />
+                <View style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Price Amount</Text>
+                    <TextInput
+                      testID="admin-package-price-amount"
+                      style={styles.input}
+                      value={editing.price_amount}
+                      onChangeText={(t) => setEditing({ ...editing, price_amount: t })}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ width: 110 }}>
+                    <Text style={styles.label}>Currency</Text>
+                    <TextInput
+                      testID="admin-package-price-currency"
+                      style={styles.input}
+                      value={editing.price_currency}
+                      onChangeText={(t) => setEditing({ ...editing, price_currency: t })}
+                      autoCapitalize="characters"
+                    />
+                  </View>
+                </View>
 
-                <LocalizedInput
-                  label="Features (One per line)"
-                  multiline
-                  placeholder="Feature 1\nFeature 2"
-                  value={{
-                    en: editingPackage.features.map(f => f.en).join('\n'),
-                    ar: editingPackage.features.map(f => f.ar).join('\n'),
-                    de: editingPackage.features.map(f => f.de).join('\n'),
-                  }}
-                  onChange={(val) => {
-                    const en = val.en.split('\n');
-                    const ar = val.ar.split('\n');
-                    const de = val.de.split('\n');
-                    const max = Math.max(en.length, ar.length, de.length);
-                    const features: LocalizedString[] = [];
-                    for(let i=0; i<max; i++) {
-                      if (en[i]?.trim() || ar[i]?.trim() || de[i]?.trim()) {
-                        features.push({
-                          en: en[i] || '',
-                          ar: ar[i] || '',
-                          de: de[i] || ''
-                        });
-                      }
-                    }
-                    setEditingPackage({ ...editingPackage, features });
-                  }}
-                />
-                
-                <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-                  <Save size={20} color="white" />
-                  <Text style={styles.saveBtnText}>Save Package</Text>
-                </TouchableOpacity>
+                <View style={styles.row}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Sort Order</Text>
+                    <TextInput
+                      testID="admin-package-sort"
+                      style={styles.input}
+                      value={String(editing.sort_order)}
+                      onChangeText={(t) => {
+                        const n = Number(t);
+                        setEditing({ ...editing, sort_order: Number.isFinite(n) ? n : 0 });
+                      }}
+                      keyboardType="numeric"
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Active</Text>
+                    <Pressable
+                      testID="admin-package-is-active"
+                      style={[styles.toggle, editing.is_active && styles.toggleOn]}
+                      onPress={() => setEditing({ ...editing, is_active: !editing.is_active })}
+                    >
+                      <Text style={[styles.toggleText, editing.is_active && styles.toggleTextOn]}>
+                        {editing.is_active ? 'Yes' : 'No'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                <Pressable testID="admin-package-save" style={styles.saveBtn} onPress={onSave} disabled={saving}>
+                  {saving ? <ActivityIndicator color="white" /> : <Save size={18} color="white" />}
+                  <Text style={styles.saveBtnText}>{saving ? 'Saving…' : 'Save'}</Text>
+                </Pressable>
               </>
-            )}
+            ) : null}
           </ScrollView>
         </View>
       </Modal>
@@ -201,56 +525,37 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  cardHeader: {
-    marginBottom: 4,
-  },
-  cardImage: {
+  image: {
     width: '100%',
     height: 150,
     backgroundColor: '#eee',
   },
-  headerTextContainer: {
+  content: {
     padding: 16,
-    paddingBottom: 4,
+  },
+  headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    flex: 1,
-  },
-  price: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: Colors.tint,
-  },
-  category: {
-    fontSize: 12,
-    color: '#999',
-    textTransform: 'uppercase',
+    alignItems: 'center',
     marginBottom: 8,
-    paddingHorizontal: 16,
-  },
-  description: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-    paddingHorizontal: 16,
+    gap: 12,
   },
   actions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     gap: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    paddingTop: 12,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
   },
-  iconBtn: {
-    padding: 8,
+  actionBtn: {
+    padding: 4,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  meta: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
   addBtn: {
     flexDirection: 'row',
@@ -291,7 +596,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#666',
     marginBottom: 8,
-    marginTop: 8,
+    marginTop: 16,
   },
   input: {
     borderWidth: 1,
@@ -302,8 +607,59 @@ const styles = StyleSheet.create({
     backgroundColor: '#fafafa',
   },
   textArea: {
-    height: 100,
+    minHeight: 92,
     textAlignVertical: 'top',
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  toggle: {
+    height: 46,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fafafa',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toggleOn: {
+    borderColor: Colors.tint,
+    backgroundColor: 'rgba(212, 175, 55, 0.12)',
+  },
+  toggleText: {
+    color: '#666',
+    fontWeight: '800',
+  },
+  toggleTextOn: {
+    color: Colors.tint,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    height: 36,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fafafa',
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: 180,
+  },
+  chipActive: {
+    borderColor: Colors.tint,
+    backgroundColor: Colors.tint,
+  },
+  chipText: {
+    color: '#666',
+    fontWeight: '800',
+  },
+  chipTextActive: {
+    color: 'white',
+  },
+  formError: {
+    color: Colors.error,
+    fontWeight: '700',
+    marginBottom: 10,
   },
   saveBtn: {
     backgroundColor: Colors.tint,
@@ -312,13 +668,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderRadius: 8,
-    marginTop: 32,
-    marginBottom: 32,
-    gap: 8,
+    marginTop: 24,
+    gap: 10,
   },
   saveBtnText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  stateWrap: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 12,
+  },
+  stateText: {
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  retryBtn: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    height: 40,
+    borderRadius: 999,
+    backgroundColor: Colors.tint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryText: {
+    color: Colors.background,
+    fontSize: 14,
+    fontWeight: '900',
   },
 });
