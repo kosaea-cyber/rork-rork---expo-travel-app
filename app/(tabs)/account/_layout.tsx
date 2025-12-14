@@ -27,6 +27,8 @@ export default function AccountLayout() {
       <Stack.Screen name="profile" options={{ title: t('myProfile') }} />
       <Stack.Screen name="settings" options={{ title: t('settings') }} />
       <Stack.Screen name="about" options={{ title: t('about') }} />
+      <Stack.Screen name="terms" options={{ title: t('terms') }} />
+      <Stack.Screen name="privacy" options={{ title: t('terms') }} />
       <Stack.Screen name="faq" options={{ title: t('faq') }} />
       <Stack.Screen name="blog/index" options={{ title: t('blog') }} />
       <Stack.Screen name="blog/[id]" options={{ title: '' }} />
