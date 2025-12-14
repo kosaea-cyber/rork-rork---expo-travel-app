@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import colors from '@/constants/colors';
@@ -17,9 +17,25 @@ type AdminGuardProps = {
 export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<void> } {
   const router = useRouter();
   const [state, setState] = useState<AdminGuardState>({ status: 'checking' });
+  const mountedRef = useRef<boolean>(true);
+  const redirectedRef = useRef<boolean>(false);
+
+  type ReplaceArg = Parameters<ReturnType<typeof useRouter>['replace']>[0];
+
+  const safeReplace = React.useCallback(
+    (href: ReplaceArg) => {
+      if (!mountedRef.current) return;
+      if (redirectedRef.current) return;
+      redirectedRef.current = true;
+      console.log('[AdminGuard] router.replace', { href });
+      router.replace(href);
+    },
+    [router]
+  );
 
   const check = React.useCallback(async () => {
-    setState({ status: 'checking' });
+    redirectedRef.current = false;
+    if (mountedRef.current) setState({ status: 'checking' });
     console.log('[AdminGuard] checking session + role');
 
     const { data, error } = await supabase.auth.getSession();
@@ -28,10 +44,12 @@ export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<
       error: error?.message ?? null,
     });
 
+    if (!mountedRef.current) return;
+
     const session = data.session;
     if (!session || error) {
       setState({ status: 'denied' });
-      router.replace('/auth/login');
+      safeReplace('/auth/welcome');
       return;
     }
 
@@ -45,6 +63,8 @@ export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<
       error: profileRes.error?.message ?? null,
     });
 
+    if (!mountedRef.current) return;
+
     if (profileRes.error) {
       setState({ status: 'error', message: 'Unable to verify admin access. Please try again.' });
       return;
@@ -56,20 +76,19 @@ export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<
     }
 
     setState({ status: 'denied' });
-    router.replace('/(tabs)/home');
-  }, [router]);
+    safeReplace('/(tabs)/home');
+  }, [safeReplace]);
 
   useEffect(() => {
-    let cancelled = false;
+    mountedRef.current = true;
 
-    check()
-      .catch((e) => {
-        console.error('[AdminGuard] unexpected error', e);
-        if (!cancelled) setState({ status: 'error', message: 'Something went wrong. Please try again.' });
-      });
+    check().catch((e) => {
+      console.error('[AdminGuard] unexpected error', e);
+      if (mountedRef.current) setState({ status: 'error', message: 'Something went wrong. Please try again.' });
+    });
 
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
   }, [check]);
 
@@ -81,6 +100,26 @@ export default function AdminGuard({ children }: AdminGuardProps) {
 
   const content = useMemo(() => {
     if (state.status === 'allowed') return children;
+
+    if (state.status === 'denied') {
+      return (
+        <View style={styles.container} testID="admin-guard-denied">
+          <Text style={styles.title}>Admin access required</Text>
+          <Text style={styles.subtitle}>You don’t have permission to view this page.</Text>
+          <Pressable
+            testID="admin-guard-go-home"
+            style={styles.retryBtn}
+            onPress={() => {
+              retry().catch((e: unknown) => {
+                console.error('[AdminGuard] re-check error', e);
+              });
+            }}
+          >
+            <Text style={styles.retryText}>Re-check access</Text>
+          </Pressable>
+        </View>
+      );
+    }
 
     if (state.status === 'error') {
       return (
