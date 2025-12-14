@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, User as UserIcon, Calendar, CheckCircle, XCircle, Clock } from 'lucide-react-native';
+import { ArrowLeft, User as UserIcon, Calendar, CheckCircle, XCircle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { db } from '@/lib/db';
 import { Booking, User, Package } from '@/lib/db/types';
@@ -15,27 +15,27 @@ export default function BookingDetail() {
   const [pkg, setPkg] = useState<Package | null>(null); // Optional package
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (id) loadData();
-  }, [id]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    if (!id) return;
     setLoading(true);
     const b = await db.bookings.findById(id);
     if (b) {
       setBooking(b);
       const u = await db.users.findUnique({ id: b.customerId });
       if (u) setCustomer(u);
-      
+
       if (b.packageId) {
-        // Find package (assuming we have a method or manual search)
         const packages = await db.packages.findMany();
-        const p = packages.find(pkg => pkg.id === b.packageId);
+        const p = packages.find((pkgItem) => pkgItem.id === b.packageId);
         if (p) setPkg(p);
       }
     }
     setLoading(false);
-  };
+  }, [id]);
+
+  useEffect(() => {
+    if (id) loadData();
+  }, [id, loadData]);
 
   const updateStatus = async (status: 'confirmed' | 'cancelled' | 'completed') => {
     if (!booking) return;

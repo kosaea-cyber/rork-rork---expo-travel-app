@@ -1,19 +1,76 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 import Colors from '@/constants/colors';
 import { Booking } from '@/lib/db/types';
-import { trpc } from '@/lib/trpc';
+import { supabase } from '@/lib/supabase/client';
+
+type BookingRow = {
+  id: string;
+  reference: string | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_email: string | null;
+  package_id: string | null;
+  package_title: string | null;
+  service_category_id: string | null;
+  status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | null;
+  start_date: string | null;
+  end_date: string | null;
+  travelers: number | null;
+  notes: string | null;
+  created_at: string | null;
+  type: string | null;
+};
+
+function mapBookingRow(row: BookingRow): Booking {
+  return {
+    id: row.id,
+    reference: row.reference ?? '',
+    customerId: row.customer_id ?? '',
+    customerName: row.customer_name ?? undefined,
+    customerEmail: row.customer_email ?? undefined,
+    packageId: row.package_id ?? undefined,
+    packageTitle: row.package_title ?? undefined,
+    serviceCategoryId: row.service_category_id ?? '',
+    status: (row.status ?? 'pending') as Booking['status'],
+    startDate: row.start_date ?? '',
+    endDate: row.end_date ?? '',
+    travelers: row.travelers ?? 0,
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at ?? '',
+    type: row.type ?? undefined,
+  };
+}
 
 export default function BookingsPage() {
   const router = useRouter();
   const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed' | 'cancelled'>('all');
 
-  const { data: bookings = [], isLoading: loading, refetch } = trpc.bookings.listAllBookings.useQuery();
+  const bookingsQuery = useQuery({
+    queryKey: ['admin', 'bookings'],
+    queryFn: async (): Promise<Booking[]> => {
+      console.log('[admin/bookings] loading bookings from supabase');
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-  const filtered = bookings.filter(b => 
-    filter === 'all' ? true : b.status === filter
-  );
+      if (error) {
+        console.error('[admin/bookings] supabase error', error);
+        throw new Error(error.message);
+      }
+
+      const rows: BookingRow[] = (data ?? []) as BookingRow[];
+      return rows.map(mapBookingRow);
+    },
+  });
+
+  const filtered = useMemo(() => {
+    const bookings: Booking[] = bookingsQuery.data ?? [];
+    return bookings.filter((b: Booking) => (filter === 'all' ? true : b.status === filter));
+  }, [bookingsQuery.data, filter]);
 
   const getStatusColor = (status: string) => {
     switch(status) {
@@ -61,21 +118,36 @@ export default function BookingsPage() {
         ))}
       </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color={Colors.tint} style={{ marginTop: 50 }} />
+      {bookingsQuery.isLoading ? (
+        <ActivityIndicator size="large" color={Colors.tint} style={{ marginTop: 50 }} testID="adminBookingsLoading" />
+      ) : bookingsQuery.isError ? (
+        <View style={styles.empty} testID="adminBookingsError">
+          <Text style={styles.emptyText}>Failed to load bookings.</Text>
+          <Text style={[styles.emptyText, { marginTop: 6, fontSize: 12 }]}>
+            {(bookingsQuery.error as Error | undefined)?.message ?? 'Unknown error'}
+          </Text>
+          <TouchableOpacity style={[styles.tab, { marginTop: 16 }]} onPress={() => bookingsQuery.refetch()} testID="adminBookingsRetry">
+            <Text style={styles.tabText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <FlatList
-            data={filtered}
-            renderItem={renderItem}
-            keyExtractor={item => item.id}
-            contentContainerStyle={styles.list}
-            refreshing={loading}
-            onRefresh={refetch}
-            ListEmptyComponent={
-            <View style={styles.empty}>
-                <Text style={styles.emptyText}>No bookings found</Text>
+          data={filtered}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl
+              refreshing={bookingsQuery.isFetching}
+              onRefresh={() => bookingsQuery.refetch()}
+              tintColor={Colors.tint}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.empty} testID="adminBookingsEmpty">
+              <Text style={styles.emptyText}>No bookings found</Text>
             </View>
-            }
+          }
         />
       )}
     </View>

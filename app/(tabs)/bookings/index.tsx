@@ -18,7 +18,7 @@ export default function BookingsScreen() {
     if (user) {
       fetchBookings();
     }
-  }, [user]);
+  }, [user, fetchBookings]);
 
   if (!user && !isGuest) {
     // Should not happen due to route protection but safe guard
