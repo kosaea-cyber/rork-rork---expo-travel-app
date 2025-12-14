@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Edit2, Plus, Save, Trash2, X } from 'lucide-react-native';
+import { ChevronDown, Edit2, Plus, Save, Trash2, X } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 
@@ -81,6 +81,7 @@ export default function AdminPackages() {
   const [modalVisible, setModalVisible] = useState<boolean>(false);
   const [editing, setEditing] = useState<EditablePackage | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState<boolean>(false);
 
   const categoriesQuery = useQuery({
     queryKey: ['admin', 'service_categories', 'minimal'],
@@ -206,10 +207,10 @@ export default function AdminPackages() {
 
   const openNew = useCallback(() => {
     setFormError(null);
-    const firstActive = categories.find((c) => c.is_active !== false);
+    const first = categories[0];
     setEditing({
       ...normalizePackage(null),
-      category_id: firstActive?.id ?? '',
+      category_id: first?.id ?? '',
     });
     setModalVisible(true);
   }, [categories]);
@@ -224,6 +225,7 @@ export default function AdminPackages() {
     setModalVisible(false);
     setEditing(null);
     setFormError(null);
+    setCategoryPickerOpen(false);
   }, []);
 
   const saving = createMutation.isPending || updateMutation.isPending;
@@ -381,24 +383,75 @@ export default function AdminPackages() {
                 {formError ? <Text style={styles.formError}>{formError}</Text> : null}
 
                 <Text style={styles.label}>Category</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
-                  {categories.map((c) => {
-                    const isSelected = editing.category_id === c.id;
-                    const label = (c.title_en ?? '').trim() || c.id;
-                    return (
+                <Pressable
+                  testID="admin-package-category-selector"
+                  style={styles.dropdownBtn}
+                  onPress={() => setCategoryPickerOpen(true)}
+                >
+                  <Text style={styles.dropdownText} numberOfLines={1}>
+                    {editing.category_id
+                      ? categoryLabelById.get(editing.category_id) ?? editing.category_id
+                      : 'Select a category'}
+                  </Text>
+                  <ChevronDown size={18} color="#333" />
+                </Pressable>
+
+                <Modal
+                  visible={categoryPickerOpen}
+                  animationType="fade"
+                  transparent
+                  onRequestClose={() => setCategoryPickerOpen(false)}
+                >
+                  <Pressable
+                    testID="admin-package-category-picker-backdrop"
+                    style={styles.pickerBackdrop}
+                    onPress={() => setCategoryPickerOpen(false)}
+                  >
+                    <Pressable
+                      testID="admin-package-category-picker"
+                      style={styles.pickerSheet}
+                      onPress={() => {
+                        return;
+                      }}
+                    >
+                      <Text style={styles.pickerTitle}>Choose category</Text>
+                      <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingVertical: 6 }}>
+                        {categories.map((c) => {
+                          const isSelected = editing.category_id === c.id;
+                          const label = (c.title_en ?? '').trim() || c.id;
+                          const inactive = c.is_active === false;
+                          return (
+                            <Pressable
+                              key={c.id}
+                              testID={`admin-package-category-${c.id}`}
+                              style={[styles.pickerRow, isSelected && styles.pickerRowActive]}
+                              onPress={() => {
+                                setEditing({ ...editing, category_id: c.id });
+                                setCategoryPickerOpen(false);
+                              }}
+                            >
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.pickerRowTitle} numberOfLines={1}>
+                                  {label}
+                                </Text>
+                                {inactive ? <Text style={styles.pickerRowMeta}>Inactive</Text> : null}
+                              </View>
+                              {isSelected ? <Text style={styles.pickerCheck}>✓</Text> : null}
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+
                       <Pressable
-                        key={c.id}
-                        testID={`admin-package-category-${c.id}`}
-                        style={[styles.chip, isSelected && styles.chipActive]}
-                        onPress={() => setEditing({ ...editing, category_id: c.id })}
+                        testID="admin-package-category-picker-close"
+                        style={styles.pickerCloseBtn}
+                        onPress={() => setCategoryPickerOpen(false)}
                       >
-                        <Text style={[styles.chipText, isSelected && styles.chipTextActive]} numberOfLines={1}>
-                          {label}
-                        </Text>
+                        <Text style={styles.pickerCloseText}>Close</Text>
                       </Pressable>
-                    );
-                  })}
-                </ScrollView>
+                    </Pressable>
+                  </Pressable>
+                </Modal>
 
                 <Text style={styles.label}>Title (EN)</Text>
                 <TextInput
@@ -655,6 +708,82 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: 'white',
+  },
+  dropdownBtn: {
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    backgroundColor: '#fafafa',
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  dropdownText: {
+    flex: 1,
+    color: '#222',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  pickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    padding: 16,
+    justifyContent: 'flex-end',
+  },
+  pickerSheet: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 14,
+  },
+  pickerTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#111',
+    paddingHorizontal: 6,
+    paddingBottom: 10,
+  },
+  pickerRow: {
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  pickerRowActive: {
+    backgroundColor: 'rgba(212, 175, 55, 0.12)',
+  },
+  pickerRowTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#111',
+  },
+  pickerRowMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#8a8a8a',
+  },
+  pickerCheck: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: Colors.tint,
+  },
+  pickerCloseBtn: {
+    marginTop: 10,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#111',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickerCloseText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '900',
   },
   formError: {
     color: Colors.error,
