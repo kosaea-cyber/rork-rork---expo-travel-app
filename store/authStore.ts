@@ -16,6 +16,28 @@ interface AuthState {
   updateProfile: (updates: Partial<User>) => Promise<void>;
 }
 
+function safeErrorDetails(error: unknown): Record<string, unknown> {
+  if (!error) return { error: null };
+
+  const e = error as {
+    message?: string;
+    code?: string;
+    details?: string;
+    hint?: string;
+    status?: number;
+    name?: string;
+  };
+
+  return {
+    message: e?.message ?? String(error),
+    code: e?.code ?? null,
+    details: e?.details ?? null,
+    hint: e?.hint ?? null,
+    status: e?.status ?? null,
+    name: e?.name ?? null,
+  };
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isLoading: true,
@@ -43,23 +65,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .maybeSingle();
 
       if (profileRes.error) {
-        const err = profileRes.error as unknown as {
-          message?: string;
-          code?: string;
-          details?: string;
-          hint?: string;
-          status?: number;
-          name?: string;
-        };
+        const details = safeErrorDetails(profileRes.error);
 
-        console.error('[authStore] profiles select error', {
-          message: err?.message ?? String(profileRes.error),
-          code: err?.code ?? null,
-          details: err?.details ?? null,
-          hint: err?.hint ?? null,
-          status: err?.status ?? null,
-          name: err?.name ?? null,
-        });
+        console.error(
+          '[authStore] profiles select error',
+          details,
+          typeof details === 'object' ? JSON.stringify(details) : String(details)
+        );
+
+        const status = (details.status as number | null) ?? null;
+        const code = (details.code as string | null) ?? null;
+
+        if (status === 401 || code === 'PGRST301') {
+          console.warn('[authStore] profiles select unauthorized; signing out');
+          try {
+            await supabase.auth.signOut();
+          } catch (e) {
+            console.error('[authStore] signOut after profiles error failed', e);
+          }
+          set({ isLoading: false, user: null, isAdmin: false, isGuest: false });
+          return;
+        }
       }
 
       const role = (profileRes.data?.role ?? 'customer') as 'admin' | 'customer';
