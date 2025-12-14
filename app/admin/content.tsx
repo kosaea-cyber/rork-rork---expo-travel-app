@@ -3,18 +3,15 @@ import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, Alert 
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useDataStore } from '@/store/dataStore';
-import { AppSettings, LocalizedString } from '@/lib/db/types';
+import { AppSettings } from '@/lib/db/types';
 import LocalizedInput from '@/components/admin/LocalizedInput';
 
 export default function ManageContent() {
   const router = useRouter();
-  const { appContent, initData, updateAppContent } = useDataStore();
+  const { appContent, updateAppContent } = useDataStore();
   
   const [form, setForm] = useState<AppSettings>(appContent);
 
-  useEffect(() => {
-    initData();
-  }, []);
 
   useEffect(() => {
     if (appContent) {
@@ -27,7 +24,7 @@ export default function ManageContent() {
       await updateAppContent(form);
       Alert.alert('Success', 'Content updated successfully');
       router.back();
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Failed to save content');
     }
   };

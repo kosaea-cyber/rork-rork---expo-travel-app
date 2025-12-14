@@ -1,7 +1,7 @@
 import { Storage } from './storage';
 import * as Crypto from 'expo-crypto';
-import { DatabaseSchema, User, ServiceCategory, Package, Booking, Conversation, Message, BlogPost, AppSettings, FAQ, HeroSlide } from './types';
-import { MOCK_SERVICES, MOCK_PACKAGES, MOCK_BLOGS, MOCK_FAQ, MOCK_APP_CONTENT } from '@/mocks/data';
+import { DatabaseSchema, User, ServiceCategory, Package, Booking, Conversation, Message, BlogPost, AppSettings, HeroSlide } from './types';
+
 
 const DB_KEY = 'rork_app_db_v6';
 
@@ -146,61 +146,16 @@ class Database {
         }
         this.data = { ...INITIAL_DB, ...parsed };
       } else {
-        this.seedFromMocks();
         await this.save();
       }
       this.initialized = true;
       console.log('Database initialized');
     } catch (e) {
       console.error('Database init failed', e);
-      this.seedFromMocks();
+      
     }
   }
 
-  private seedFromMocks() {
-    this.data.categories = MOCK_SERVICES.map(s => ({
-      id: s.id,
-      title: s.title,
-      description: s.description,
-      icon: s.icon,
-      slug: s.id.toLowerCase(),
-      image: s.image
-    }));
-
-    this.data.packages = MOCK_PACKAGES.map(p => ({
-      id: p.id,
-      categoryId: p.categoryId,
-      title: p.title,
-      description: p.description,
-      duration: p.duration,
-      features: p.features,
-      included: p.included || [],
-      isFeatured: p.isFeatured,
-      price: p.price,
-      imageUrl: p.imageUrl
-    }));
-
-    this.data.blogs = MOCK_BLOGS.map(b => ({
-      id: b.id,
-      title: b.title,
-      content: b.content,
-      excerpt: b.excerpt,
-      author: b.author || 'Ruwasi Team',
-      createdAt: b.createdAt,
-      category: b.category || 'General',
-      imageUrl: b.imageUrl
-    }));
-
-    this.data.faqs = MOCK_FAQ.map(f => ({
-      id: f.id,
-      question: f.question,
-      answer: f.answer,
-      category: 'General'
-    }));
-    
-    // Seed Settings from Mock
-    this.data.settings = MOCK_APP_CONTENT;
-  }
 
   async save() {
     try {

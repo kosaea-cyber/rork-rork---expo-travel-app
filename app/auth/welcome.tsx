@@ -11,11 +11,7 @@ export default function WelcomeScreen() {
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
   const setGuest = useAuthStore((state) => state.setGuest);
-  const { appContent, initData } = useDataStore();
-
-  React.useEffect(() => {
-    initData();
-  }, []);
+  const { appContent } = useDataStore();
 
   const handleGuest = () => {
     setGuest();

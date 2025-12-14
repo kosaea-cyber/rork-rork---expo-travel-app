@@ -47,7 +47,7 @@ export default function EditBlog() {
         await updateBlog(form as BlogPost);
       }
       router.back();
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Failed to save blog post');
     }
   };

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Plus, Trash2, Edit } from 'lucide-react-native';
@@ -7,11 +7,8 @@ import { useDataStore } from '@/store/dataStore';
 
 export default function AdminBlogs() {
   const router = useRouter();
-  const { blogs, initData, deleteBlog } = useDataStore();
+  const { blogs, deleteBlog } = useDataStore();
 
-  useEffect(() => {
-    initData();
-  }, []);
 
   const handleDelete = (id: string) => {
     Alert.alert(

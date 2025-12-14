@@ -22,7 +22,7 @@ import { useProfileStore } from '@/store/profileStore';
 export default function LoginScreen() {
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
-  const { appContent, initData } = useDataStore();
+  const { appContent } = useDataStore();
 
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -40,13 +40,8 @@ export default function LoginScreen() {
         console.error('[auth/login] supabaseConnectionCheck failed (non-blocking)', e);
       }
 
-      try {
-        await initData();
-      } catch (e) {
-        console.error('[auth/login] initData failed (non-blocking)', e);
-      }
     })();
-  }, [initData]);
+  }, []);
 
   const handleLogin = useCallback(async () => {
     console.log('[login] pressed');

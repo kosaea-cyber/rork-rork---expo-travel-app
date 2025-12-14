@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, ScrollView, Image } from 'react-native';
 import { useDataStore } from '@/store/dataStore';
 import { ServiceCategory } from '@/lib/db/types';
@@ -7,13 +7,10 @@ import { Plus, Edit2, Trash2, X, Save } from 'lucide-react-native';
 import LocalizedInput from '@/components/admin/LocalizedInput';
 
 export default function AdminServices() {
-  const { services, updateService, addService, deleteService, initData } = useDataStore();
+  const { services, updateService, addService, deleteService } = useDataStore();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingService, setEditingService] = useState<ServiceCategory | null>(null);
 
-  useEffect(() => {
-    initData();
-  }, []);
 
   const handleEdit = (service: ServiceCategory) => {
     setEditingService(service);

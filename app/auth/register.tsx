@@ -21,10 +21,9 @@ import { supabase, supabaseConnectionCheck } from '@/lib/supabase/client';
 export default function RegisterScreen() {
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
-  const { appContent, initData } = useDataStore();
+  const { appContent } = useDataStore();
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const language = useI18nStore((state) => state.language);
 
   useEffect(() => {
     (async () => {
@@ -34,13 +33,8 @@ export default function RegisterScreen() {
         console.error('[auth/register] supabaseConnectionCheck failed (non-blocking)', e);
       }
 
-      try {
-        await initData();
-      } catch (e) {
-        console.error('[auth/register] initData failed (non-blocking)', e);
-      }
     })();
-  }, [initData]);
+  }, []);
 
   const [formData, setFormData] = useState<{ 
     name: string;

@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { ServiceCategory, Package, BlogPost, AppSettings, FAQ } from '@/lib/db/types';
-import { MOCK_APP_CONTENT, MOCK_BLOGS, MOCK_FAQ, MOCK_PACKAGES, MOCK_SERVICES } from '@/mocks/data';
 
 interface DataState {
   services: ServiceCategory[];
@@ -63,20 +62,8 @@ export const useDataStore = create<DataState>((set, get) => ({
   isLoading: true,
 
   initData: async () => {
-    try {
-      console.log('[dataStore] initData: using local mocks (no TRPC/backend)');
-      set({
-        services: MOCK_SERVICES,
-        packages: MOCK_PACKAGES,
-        blogs: MOCK_BLOGS,
-        faqs: MOCK_FAQ,
-        appContent: MOCK_APP_CONTENT,
-        isLoading: false,
-      });
-    } catch (e) {
-      console.error('[dataStore] initData failed (unexpected)', e);
-      set({ isLoading: false });
-    }
+    console.log('[dataStore] initData disabled (Supabase-only)');
+    set({ isLoading: false });
   },
 
   updateService: async () => {

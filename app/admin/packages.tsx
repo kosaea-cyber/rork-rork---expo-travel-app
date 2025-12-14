@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Modal, ScrollView, Image } from 'react-native';
 import { useDataStore } from '@/store/dataStore';
 import { Package, LocalizedString } from '@/lib/db/types';
@@ -7,13 +7,10 @@ import { Plus, Edit2, Trash2, X, Save } from 'lucide-react-native';
 import LocalizedInput from '@/components/admin/LocalizedInput';
 
 export default function AdminPackages() {
-  const { packages, updatePackage, addPackage, deletePackage, initData } = useDataStore();
+  const { packages, updatePackage, addPackage, deletePackage } = useDataStore();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingPackage, setEditingPackage] = useState<Package | null>(null);
 
-  useEffect(() => {
-    initData();
-  }, []);
 
   const handleEdit = (pkg: Package) => {
     setEditingPackage(pkg);
