@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Rork + Expo Travel App",
-    "slug": "rork-expo-travel-app",
+    "name": "RAWASI Elite",
+    "slug": "rawasi-elite",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "rork-app",
+    "scheme": "rawasi-elite",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -15,11 +15,11 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.rork.rork-expo-travel-app",
+      "bundleIdentifier": "com.rawasi.elite",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos",
-        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera",
-        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone"
+        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos to upload images.",
+        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera to upload images.",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone if needed for support."
       }
     },
     "android": {
@@ -27,12 +27,10 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.rork_expo_travel_app",
+      "package": "com.rawasi.elite",
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "INTERNET"
+        "INTERNET",
+        "CAMERA"
       ]
     },
     "web": {
@@ -50,7 +48,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "The app accesses your photos to let you share them with your friends."
+          "photosPermission": "The app needs access to your photos so you can upload images."
         }
       ]
     ],
