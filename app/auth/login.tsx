@@ -102,7 +102,7 @@ export default function LoginScreen() {
       const fetchProfile = async () => {
         const res = await supabase
           .from('profiles')
-          .select('id, role, preferred_language')
+          .select('id, role, preferred_language, is_blocked')
           .eq('id', data.user.id)
           .maybeSingle();
 
@@ -135,6 +135,14 @@ export default function LoginScreen() {
           'Profile not ready',
           'We could not find your profile yet. Please wait a moment and try again.'
         );
+        return;
+      }
+
+      if (profileRes.data.is_blocked) {
+        console.warn('[auth/login] blocked profile attempted login', { userId: data.user.id });
+        clearProfile();
+        await supabase.auth.signOut();
+        Alert.alert('Account disabled', 'Your account has been disabled. Please contact support.');
         return;
       }
 
