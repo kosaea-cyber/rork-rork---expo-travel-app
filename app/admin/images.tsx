@@ -57,6 +57,7 @@ export default function ManageImages() {
   const [uploadingKey, setUploadingKey] = useState<AppImageKey | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [images, setImages] = useState<AppImagesState>({
     heroBackground: '',
@@ -69,6 +70,7 @@ export default function ManageImages() {
     try {
       console.log('[admin/images] fetching app_images');
       setLoading(true);
+      setErrorMessage(null);
 
       const res = await supabase.from('app_images').select('key,url').in('key', IMAGE_KEYS);
 
@@ -96,7 +98,7 @@ export default function ManageImages() {
       setImages(next);
     } catch (e) {
       console.error('[admin/images] fetch failed', e);
-      Alert.alert('Error', 'Failed to load images from database.');
+      setErrorMessage(e instanceof Error ? e.message : 'Failed to load images from database.');
     } finally {
       setLoading(false);
     }
@@ -169,6 +171,18 @@ export default function ManageImages() {
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]} testID="admin-images-loading">
         <ActivityIndicator />
         <Text style={{ marginTop: 10 }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <View style={[styles.container, styles.stateWrap]} testID="admin-images-error">
+        <Text style={styles.stateTitle}>Couldn’t load images</Text>
+        <Text style={styles.stateText}>{errorMessage}</Text>
+        <TouchableOpacity testID="admin-images-retry" style={styles.stateButton} onPress={fetchImages}>
+          <Text style={styles.stateButtonText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -304,5 +318,34 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  stateWrap: {
+    padding: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stateTitle: {
+    color: '#111',
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  stateText: {
+    color: '#666',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  stateButton: {
+    marginTop: 14,
+    backgroundColor: Colors.tint,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  stateButtonText: {
+    color: 'white',
+    fontWeight: '800',
   },
 });

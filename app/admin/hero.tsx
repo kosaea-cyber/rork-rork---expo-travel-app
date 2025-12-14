@@ -79,6 +79,7 @@ function toRowInsert(form: SlideFormState) {
 export default function ManageHero() {
   const [slides, setSlides] = useState<HeroSlideRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   const [saving, setSaving] = useState<boolean>(false);
@@ -96,6 +97,7 @@ export default function ManageHero() {
 
   const fetchSlides = useCallback(async () => {
     setLoading(true);
+    setErrorMessage(null);
     try {
       const res = await supabase.from('hero_slides').select('*').order('sort_order', { ascending: true });
       console.log('[admin/hero] hero_slides list', {
@@ -103,15 +105,15 @@ export default function ManageHero() {
         error: res.error?.message ?? null,
       });
       if (res.error) {
-        Alert.alert('Error', res.error.message);
         setSlides([]);
+        setErrorMessage(res.error.message);
         return;
       }
       setSlides((res.data ?? []) as HeroSlideRow[]);
     } catch (e) {
       console.error('[admin/hero] fetchSlides unexpected error', e);
-      Alert.alert('Error', 'Failed to load slides');
       setSlides([]);
+      setErrorMessage(e instanceof Error ? e.message : 'Failed to load slides');
     } finally {
       setLoading(false);
     }
@@ -460,6 +462,14 @@ export default function ManageHero() {
     <AdminGuard>
       {loading ? (
         <ActivityIndicator testID="admin-hero-loading" size="large" color={Colors.tint} style={{ marginTop: 50 }} />
+      ) : errorMessage ? (
+        <View style={styles.stateWrap} testID="admin-hero-error">
+          <Text style={styles.stateTitle}>Couldn’t load hero slides</Text>
+          <Text style={styles.stateText}>{errorMessage}</Text>
+          <TouchableOpacity testID="admin-hero-retry" onPress={fetchSlides} style={styles.stateButton}>
+            <Text style={styles.stateButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         content
       )}
@@ -472,6 +482,36 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     backgroundColor: Colors.background,
+  },
+  stateWrap: {
+    flex: 1,
+    padding: 24,
+    backgroundColor: Colors.background,
+    justifyContent: 'center',
+  },
+  stateTitle: {
+    color: Colors.text,
+    fontSize: 16,
+    fontWeight: '900',
+    marginBottom: 8,
+  },
+  stateText: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  stateButton: {
+    marginTop: 14,
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.tint,
+    paddingHorizontal: 16,
+    height: 40,
+    borderRadius: 999,
+    justifyContent: 'center',
+  },
+  stateButtonText: {
+    color: Colors.background,
+    fontWeight: '900',
   },
   topRow: {
     flexDirection: 'row',
