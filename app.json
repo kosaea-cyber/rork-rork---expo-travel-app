@@ -13,15 +13,14 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.rawasi.elite",
-      "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos to upload images.",
-        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera to upload images.",
-        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone if needed for support."
-      }
-    },
+   "ios": {
+  "supportsTablet": false,
+  "bundleIdentifier": "com.rawasi.elite",
+  "infoPlist": {
+    "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos to upload images.",
+    "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera to upload images."
+  }
+},
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
