@@ -9,7 +9,6 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 console.log('[supabase] env check', {
   hasUrl: Boolean(supabaseUrl),
   hasAnonKey: Boolean(supabaseAnonKey),
-  urlPrefix: supabaseUrl?.slice(0, 18) ?? null,
 });
 
 if (!supabaseUrl || !supabaseAnonKey) {
