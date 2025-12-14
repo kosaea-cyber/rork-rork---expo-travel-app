@@ -52,7 +52,12 @@ export default function ServiceDetailsScreen() {
     queryFn: async (): Promise<ServiceCategoryRow> => {
       console.log('[serviceDetails] fetching service_categories', { id });
 
-      const { data, error } = await supabase.from('service_categories').select('*').eq('id', id as string).maybeSingle();
+      const { data, error } = await supabase
+        .from('service_categories')
+        .select('*')
+        .eq('id', id as string)
+        .eq('is_active', true)
+        .maybeSingle();
 
       if (error) {
         console.log('[serviceDetails] fetch error', error);
