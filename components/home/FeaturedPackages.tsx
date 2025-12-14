@@ -146,6 +146,13 @@ export default function FeaturedPackages() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
+        ListEmptyComponent={
+          !isLoading && !isError ? (
+            <View style={styles.empty} testID="featured-packages-empty">
+              <Text style={styles.emptyText}>{t('noPackagesFound') ?? 'No packages found.'}</Text>
+            </View>
+          ) : null
+        }
       />
     </View>
   );
@@ -183,6 +190,17 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 13,
     fontWeight: '800',
+  },
+  empty: {
+    height: 130,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  emptyText: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '700',
   },
   listContent: {
     paddingHorizontal: 20,

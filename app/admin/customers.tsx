@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search, Filter, User as UserIcon } from 'lucide-react-native';
 import Colors from '@/constants/colors';
@@ -9,25 +9,38 @@ import { User } from '@/lib/db/types';
 export default function CustomersPage() {
   const router = useRouter();
   const [customers, setCustomers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState<string>('');
+
+  const loadCustomers = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      console.log('[admin/customers] loadCustomers');
+      const allUsers = await db.users.findMany({ role: 'customer' });
+      setCustomers(allUsers);
+    } catch (e) {
+      console.error('[admin/customers] loadCustomers error', e);
+      setCustomers([]);
+      setError('Failed to load customers. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     loadCustomers();
-  }, []);
+  }, [loadCustomers]);
 
-  const loadCustomers = async () => {
-    setLoading(true);
-    const allUsers = await db.users.findMany({ role: 'customer' });
-    setCustomers(allUsers);
-    setLoading(false);
-  };
-
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(search.toLowerCase()) || 
-    c.email.toLowerCase().includes(search.toLowerCase()) ||
-    c.phone?.includes(search)
-  );
+  const filteredCustomers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter((c) =>
+      c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q) || c.phone?.includes(search)
+    );
+  }, [customers, search]);
 
   const renderItem = ({ item }: { item: User }) => (
     <TouchableOpacity 
@@ -60,7 +73,7 @@ export default function CustomersPage() {
       <View style={styles.toolbar}>
         <View style={styles.searchContainer}>
           <Search size={20} color={Colors.textSecondary} />
-          <TextInput 
+          <TextInput
             style={styles.searchInput}
             placeholder="Search by name, email..."
             placeholderTextColor={Colors.textSecondary}
@@ -70,19 +83,34 @@ export default function CustomersPage() {
         </View>
       </View>
 
-      <FlatList
-        data={filteredCustomers}
-        renderItem={renderItem}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.list}
-        refreshing={loading}
-        onRefresh={loadCustomers}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No customers found</Text>
-          </View>
-        }
-      />
+      {loading && customers.length === 0 ? (
+        <View style={styles.stateWrap} testID="adminCustomersLoading">
+          <ActivityIndicator color={Colors.tint} />
+          <Text style={styles.stateText}>Loading customers…</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.stateWrap} testID="adminCustomersError">
+          <Text style={styles.stateTitle}>Couldn’t load customers</Text>
+          <Text style={styles.stateText}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={loadCustomers} testID="adminCustomersRetry">
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredCustomers}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          refreshing={loading}
+          onRefresh={loadCustomers}
+          ListEmptyComponent={
+            <View style={styles.empty} testID="adminCustomersEmpty">
+              <Text style={styles.emptyText}>No customers found</Text>
+            </View>
+          }
+        />
+      )}
     </View>
   );
 }
@@ -197,5 +225,37 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#666',
     fontSize: 16,
+  },
+  stateWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  stateTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.text,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  stateText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  retryBtn: {
+    marginTop: 14,
+    backgroundColor: Colors.tint,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  retryText: {
+    color: Colors.background,
+    fontSize: 13,
+    fontWeight: '800',
   },
 });
