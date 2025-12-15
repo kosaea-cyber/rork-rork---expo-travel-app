@@ -43,6 +43,8 @@ export default function HomeChatWidget() {
     isLoading,
     error,
     messagesByConversationId,
+    realtimeHealthByConversationId,
+    realtimeErrorByConversationId,
     getPublicConversation,
     fetchMessages,
     subscribeToConversation,
@@ -55,6 +57,18 @@ export default function HomeChatWidget() {
     if (!conversation?.id) return [];
     return messagesByConversationId[conversation.id] ?? [];
   }, [conversation?.id, messagesByConversationId]);
+
+  const realtimeHealth = useMemo(() => {
+    const id = conversation?.id;
+    if (!id) return 'idle' as const;
+    return realtimeHealthByConversationId[id] ?? ('idle' as const);
+  }, [conversation?.id, realtimeHealthByConversationId]);
+
+  const realtimeError = useMemo(() => {
+    const id = conversation?.id;
+    if (!id) return null;
+    return realtimeErrorByConversationId[id] ?? null;
+  }, [conversation?.id, realtimeErrorByConversationId]);
 
   const animateOpen = useCallback(
     (nextOpen: boolean) => {
@@ -144,6 +158,13 @@ export default function HomeChatWidget() {
     console.log('[HomeChatWidget] retry');
     void bootstrap();
   }, [bootstrap]);
+
+  const onRefresh = useCallback(() => {
+    const convId = conversation?.id;
+    if (!convId) return;
+    console.log('[HomeChatWidget] manual refresh', { convId });
+    void fetchMessages(convId, 30);
+  }, [conversation?.id, fetchMessages]);
 
   const onSend = useCallback(async () => {
     const convId = conversation?.id;
@@ -240,6 +261,18 @@ export default function HomeChatWidget() {
                   <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestLabel">
                     You are chatting as Guest
                   </Text>
+
+                  {realtimeHealth === 'error' ? (
+                    <Pressable
+                      onPress={onRefresh}
+                      style={({ pressed }) => [styles.realtimeBanner, pressed && styles.realtimeBannerPressed]}
+                      testID="homeChatWidgetRealtimeFallback"
+                    >
+                      <Text style={styles.realtimeBannerText}>
+                        Realtime unavailable{realtimeError ? `: ${realtimeError}` : ''}. Tap to refresh.
+                      </Text>
+                    </Pressable>
+                  ) : null}
                 </View>
 
                 <Pressable
@@ -401,6 +434,25 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  realtimeBanner: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,140,0,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,140,0,0.34)',
+  },
+  realtimeBannerPressed: {
+    transform: [{ scale: 0.99 }],
+  },
+  realtimeBannerText: {
+    color: Colors.text,
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 16,
   },
   closeButtonPressed: {
     transform: [{ scale: 0.98 }],

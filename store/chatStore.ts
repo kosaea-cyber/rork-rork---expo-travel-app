@@ -8,6 +8,8 @@ export type MessageSenderType = 'user' | 'admin' | 'system' | 'ai';
 
 export type SendMode = 'public_guest' | 'public_auth' | 'private_user' | 'admin';
 
+type RealtimeHealth = 'idle' | 'connecting' | 'subscribed' | 'error' | 'closed';
+
 export interface Conversation {
   id: string;
   type: ConversationType;
@@ -105,6 +107,8 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
 interface ChatState {
   conversations: Conversation[];
   messagesByConversationId: Record<string, Message[]>;
+  realtimeHealthByConversationId: Record<string, RealtimeHealth>;
+  realtimeErrorByConversationId: Record<string, string | null>;
   isLoading: boolean;
   error: string | null;
 
@@ -119,420 +123,484 @@ interface ChatState {
   adminCreatePublicConversationIfMissing: () => Promise<Conversation | null>;
 }
 
-export const useChatStore = create<ChatState>((set, get) => ({
-  conversations: [],
-  messagesByConversationId: {},
-  isLoading: false,
-  error: null,
+export const useChatStore = create<ChatState>((set, get) => {
+  const channelsByConversationId: Record<string, RealtimeChannel> = {};
 
-  getPublicConversation: async () => {
-    set({ isLoading: true, error: null });
+  return {
+    conversations: [],
+    messagesByConversationId: {},
+    realtimeHealthByConversationId: {},
+    realtimeErrorByConversationId: {},
+    isLoading: false,
+    error: null,
 
-    try {
-      console.log('[chatStore] getPublicConversation');
+    getPublicConversation: async () => {
+      set({ isLoading: true, error: null });
 
-      const { data, error } = await supabase
-        .from('conversations')
-        .select('id, type, customer_id, created_at, last_message_at')
-        .eq('type', 'public')
-        .order('created_at', { ascending: true })
-        .limit(1);
+      try {
+        console.log('[chatStore] getPublicConversation');
 
-      if (error) {
-        const details = safeErrorDetails(error);
-        console.error('[chatStore] getPublicConversation select error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to load public conversation');
-      }
+        const { data, error } = await supabase
+          .from('conversations')
+          .select('id, type, customer_id, created_at, last_message_at')
+          .eq('type', 'public')
+          .order('created_at', { ascending: true })
+          .limit(1);
 
-      const row = (data?.[0] ?? null) as ConversationRow | null;
-      const conv = row ? mapConversationRow(row) : null;
+        if (error) {
+          const details = safeErrorDetails(error);
+          console.error('[chatStore] getPublicConversation select error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to load public conversation');
+        }
 
-      if (conv) {
-        set((s) => ({ conversations: upsertConversation(s.conversations, conv) }));
-      }
+        const row = (data?.[0] ?? null) as ConversationRow | null;
+        const conv = row ? mapConversationRow(row) : null;
 
-      set({ isLoading: false });
-      return conv;
-    } catch (e) {
-      const details = safeErrorDetails(e);
-      console.error('[chatStore] getPublicConversation failed', details);
-      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load public conversation' });
-      return null;
-    }
-  },
+        if (conv) {
+          set((s) => ({ conversations: upsertConversation(s.conversations, conv) }));
+        }
 
-  getOrCreatePrivateConversation: async () => {
-    set({ isLoading: true, error: null });
-
-    try {
-      console.log('[chatStore] getOrCreatePrivateConversation');
-
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) {
-        const details = safeErrorDetails(authError);
-        console.error('[chatStore] auth.getUser error', details);
-      }
-
-      const userId = authData.user?.id ?? '';
-      if (!userId) {
-        set({ isLoading: false, error: 'Not authenticated' });
+        set({ isLoading: false });
+        return conv;
+      } catch (e) {
+        const details = safeErrorDetails(e);
+        console.error('[chatStore] getPublicConversation failed', details);
+        set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load public conversation' });
         return null;
       }
+    },
 
-      const { data: existingData, error: existingError } = await supabase
-        .from('conversations')
-        .select('id, type, customer_id, created_at, last_message_at')
-        .eq('type', 'private')
-        .eq('customer_id', userId)
-        .order('last_message_at', { ascending: false })
-        .limit(1);
-
-      if (existingError) {
-        const details = safeErrorDetails(existingError);
-        console.error('[chatStore] private conversations select error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to load private conversation');
-      }
-
-      const existingRow = (existingData?.[0] ?? null) as ConversationRow | null;
-      if (existingRow) {
-        const conv = mapConversationRow(existingRow);
-        set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
-        return conv;
-      }
-
-      const { data: inserted, error: insertError } = await supabase
-        .from('conversations')
-        .insert({ type: 'private', customer_id: userId })
-        .select('id, type, customer_id, created_at, last_message_at')
-        .single();
-
-      if (insertError) {
-        const details = safeErrorDetails(insertError);
-        console.error('[chatStore] insert private conversation error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to create private conversation');
-      }
-
-      const conv = mapConversationRow(inserted as ConversationRow);
-      set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
-      return conv;
-    } catch (e) {
-      const details = safeErrorDetails(e);
-      console.error('[chatStore] getOrCreatePrivateConversation failed', details);
-      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load chat' });
-      return null;
-    }
-  },
-
-  fetchMessages: async (conversationId, limit, before) => {
-    set({ isLoading: true, error: null });
-
-    try {
-      console.log('[chatStore] fetchMessages', { conversationId, limit, before: before ?? null });
-
-      let q = supabase
-        .from('messages')
-        .select('id, conversation_id, sender_type, sender_id, body, created_at')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: false })
-        .limit(limit);
-
-      if (before) {
-        q = q.lt('created_at', before);
-      }
-
-      const { data, error } = await q;
-
-      if (error) {
-        const details = safeErrorDetails(error);
-        console.error('[chatStore] fetchMessages select error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to load messages');
-      }
-
-      const rows = (data ?? []) as MessageRow[];
-      const incoming = rows.map(mapMessageRow).reverse();
-
-      set((s) => {
-        const existing = s.messagesByConversationId[conversationId] ?? [];
-        return {
-          messagesByConversationId: {
-            ...s.messagesByConversationId,
-            [conversationId]: mergeMessages(existing, incoming),
-          },
-          isLoading: false,
-        };
-      });
-
-      return incoming;
-    } catch (e) {
-      const details = safeErrorDetails(e);
-      console.error('[chatStore] fetchMessages failed', details);
-      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load messages' });
-      return [];
-    }
-  },
-
-  sendMessage: async (conversationId, body, mode) => {
-    try {
-      const trimmed = body.trim();
-      if (!trimmed) return null;
-
-      console.log('[chatStore] sendMessage', { conversationId, mode, bodyLen: trimmed.length });
-
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) {
-        const details = safeErrorDetails(authError);
-        console.error('[chatStore] auth.getUser error', details);
-      }
-
-      const userId = authData.user?.id ?? null;
-
-      let senderType: MessageSenderType = 'user';
-      let senderId: string | null = null;
-
-      if (mode === 'public_guest') {
-        senderType = 'user';
-        senderId = null;
-      } else if (mode === 'public_auth') {
-        senderType = 'user';
-        senderId = userId;
-        if (!senderId) throw new Error('Not authenticated');
-      } else if (mode === 'private_user') {
-        senderType = 'user';
-        senderId = userId;
-        if (!senderId) throw new Error('Not authenticated');
-      } else if (mode === 'admin') {
-        senderType = 'admin';
-        senderId = userId;
-        if (!senderId) throw new Error('Not authenticated');
-      }
-
-      const { data, error } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: conversationId,
-          sender_type: senderType,
-          sender_id: senderId,
-          body: trimmed,
-        })
-        .select('id, conversation_id, sender_type, sender_id, body, created_at')
-        .single();
-
-      if (error) {
-        const details = safeErrorDetails(error);
-        console.error('[chatStore] sendMessage insert error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to send message');
-      }
-
-      const msg = mapMessageRow(data as MessageRow);
-
-      set((s) => {
-        const existing = s.messagesByConversationId[conversationId] ?? [];
-        return {
-          messagesByConversationId: {
-            ...s.messagesByConversationId,
-            [conversationId]: mergeMessages(existing, [msg]),
-          },
-        };
-      });
+    getOrCreatePrivateConversation: async () => {
+      set({ isLoading: true, error: null });
 
       try {
-        const { error: updateError } = await supabase
+        console.log('[chatStore] getOrCreatePrivateConversation');
+
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) {
+          const details = safeErrorDetails(authError);
+          console.error('[chatStore] auth.getUser error', details);
+        }
+
+        const userId = authData.user?.id ?? '';
+        if (!userId) {
+          set({ isLoading: false, error: 'Not authenticated' });
+          return null;
+        }
+
+        const { data: existingData, error: existingError } = await supabase
           .from('conversations')
-          .update({ last_message_at: new Date().toISOString() })
-          .eq('id', conversationId);
+          .select('id, type, customer_id, created_at, last_message_at')
+          .eq('type', 'private')
+          .eq('customer_id', userId)
+          .order('last_message_at', { ascending: false })
+          .limit(1);
 
-        if (updateError) {
-          console.warn('[chatStore] conversations last_message_at update blocked/failed', safeErrorDetails(updateError));
+        if (existingError) {
+          const details = safeErrorDetails(existingError);
+          console.error('[chatStore] private conversations select error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to load private conversation');
         }
-      } catch (e) {
-        console.warn('[chatStore] conversations last_message_at update unexpected error', safeErrorDetails(e));
-      }
 
-      return msg;
-    } catch (e) {
-      const details = safeErrorDetails(e);
-      console.error('[chatStore] sendMessage failed', details);
-      set({ error: (details.message as string | null) ?? 'Failed to send message' });
-      return null;
-    }
-  },
-
-  subscribeToConversation: (conversationId) => {
-    console.log('[chatStore] subscribeToConversation', { conversationId });
-
-    let channel: RealtimeChannel | null = null;
-
-    try {
-      channel = supabase
-        .channel(`messages:${conversationId}`)
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-          (payload) => {
-            try {
-              const row = payload.new as unknown as MessageRow;
-              const msg = mapMessageRow(row);
-
-              console.log('[chatStore] realtime message INSERT', {
-                conversationId,
-                id: msg.id,
-                senderType: msg.senderType,
-              });
-
-              set((s) => {
-                const existing = s.messagesByConversationId[conversationId] ?? [];
-                return {
-                  messagesByConversationId: {
-                    ...s.messagesByConversationId,
-                    [conversationId]: mergeMessages(existing, [msg]),
-                  },
-                  conversations: upsertConversation(
-                    s.conversations,
-                    {
-                      id: conversationId,
-                      type: s.conversations.find((c) => c.id === conversationId)?.type ?? 'private',
-                      customerId: s.conversations.find((c) => c.id === conversationId)?.customerId ?? null,
-                      createdAt: s.conversations.find((c) => c.id === conversationId)?.createdAt ?? new Date().toISOString(),
-                      lastMessageAt: msg.createdAt,
-                    }
-                  ),
-                };
-              });
-            } catch (e) {
-              console.error('[chatStore] realtime payload handling failed', safeErrorDetails(e));
-            }
-          }
-        )
-        .subscribe((status) => {
-          console.log('[chatStore] realtime status', { conversationId, status });
-        });
-    } catch (e) {
-      console.error('[chatStore] subscribeToConversation failed', safeErrorDetails(e));
-    }
-
-    return () => {
-      try {
-        if (channel) {
-          console.log('[chatStore] unsubscribeToConversation', { conversationId });
-          supabase.removeChannel(channel);
+        const existingRow = (existingData?.[0] ?? null) as ConversationRow | null;
+        if (existingRow) {
+          const conv = mapConversationRow(existingRow);
+          set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
+          return conv;
         }
-      } catch (e) {
-        console.error('[chatStore] unsubscribeToConversation failed', safeErrorDetails(e));
-      }
-    };
-  },
 
-  adminFetchConversations: async (limit) => {
-    set({ isLoading: true, error: null });
+        const { data: inserted, error: insertError } = await supabase
+          .from('conversations')
+          .insert({ type: 'private', customer_id: userId })
+          .select('id, type, customer_id, created_at, last_message_at')
+          .single();
 
-    try {
-      console.log('[chatStore] adminFetchConversations', { limit });
+        if (insertError) {
+          const details = safeErrorDetails(insertError);
+          console.error('[chatStore] insert private conversation error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to create private conversation');
+        }
 
-      const { data, error } = await supabase
-        .from('conversations')
-        .select('id, type, customer_id, created_at, last_message_at')
-        .order('last_message_at', { ascending: false })
-        .limit(limit);
-
-      if (error) {
-        const details = safeErrorDetails(error);
-        console.error('[chatStore] adminFetchConversations select error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to load conversations');
-      }
-
-      const rows = (data ?? []) as ConversationRow[];
-      const mapped = rows.map(mapConversationRow);
-
-      set((s) => {
-        let next = s.conversations;
-        for (const c of mapped) next = upsertConversation(next, c);
-        return { conversations: next, isLoading: false };
-      });
-
-      return mapped;
-    } catch (e) {
-      const details = safeErrorDetails(e);
-      console.error('[chatStore] adminFetchConversations failed', details);
-      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load conversations' });
-      return [];
-    }
-  },
-
-  adminGetConversationById: async (conversationId) => {
-    set({ isLoading: true, error: null });
-
-    try {
-      console.log('[chatStore] adminGetConversationById', { conversationId });
-
-      const { data, error } = await supabase
-        .from('conversations')
-        .select('id, type, customer_id, created_at, last_message_at')
-        .eq('id', conversationId)
-        .single();
-
-      if (error) {
-        const details = safeErrorDetails(error);
-        console.error('[chatStore] adminGetConversationById select error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to load conversation');
-      }
-
-      const conv = mapConversationRow(data as ConversationRow);
-      set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
-      return conv;
-    } catch (e) {
-      const details = safeErrorDetails(e);
-      console.error('[chatStore] adminGetConversationById failed', details);
-      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load conversation' });
-      return null;
-    }
-  },
-
-  adminCreatePublicConversationIfMissing: async () => {
-    set({ isLoading: true, error: null });
-
-    try {
-      console.log('[chatStore] adminCreatePublicConversationIfMissing');
-
-      const { data: existingData, error: existingError } = await supabase
-        .from('conversations')
-        .select('id, type, customer_id, created_at, last_message_at')
-        .eq('type', 'public')
-        .order('created_at', { ascending: true })
-        .limit(1);
-
-      if (existingError) {
-        const details = safeErrorDetails(existingError);
-        console.error('[chatStore] public conversations select error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to check public conversation');
-      }
-
-      const existingRow = (existingData?.[0] ?? null) as ConversationRow | null;
-      if (existingRow) {
-        const conv = mapConversationRow(existingRow);
+        const conv = mapConversationRow(inserted as ConversationRow);
         set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
         return conv;
+      } catch (e) {
+        const details = safeErrorDetails(e);
+        console.error('[chatStore] getOrCreatePrivateConversation failed', details);
+        set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load chat' });
+        return null;
+      }
+    },
+
+    fetchMessages: async (conversationId, limit, before) => {
+      set({ isLoading: true, error: null });
+
+      try {
+        console.log('[chatStore] fetchMessages', { conversationId, limit, before: before ?? null });
+
+        let q = supabase
+          .from('messages')
+          .select('id, conversation_id, sender_type, sender_id, body, created_at')
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+
+        if (before) {
+          q = q.lt('created_at', before);
+        }
+
+        const { data, error } = await q;
+
+        if (error) {
+          const details = safeErrorDetails(error);
+          console.error('[chatStore] fetchMessages select error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to load messages');
+        }
+
+        const rows = (data ?? []) as MessageRow[];
+        const incoming = rows.map(mapMessageRow).reverse();
+
+        set((s) => {
+          const existing = s.messagesByConversationId[conversationId] ?? [];
+          return {
+            messagesByConversationId: {
+              ...s.messagesByConversationId,
+              [conversationId]: mergeMessages(existing, incoming),
+            },
+            isLoading: false,
+          };
+        });
+
+        return incoming;
+      } catch (e) {
+        const details = safeErrorDetails(e);
+        console.error('[chatStore] fetchMessages failed', details);
+        set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load messages' });
+        return [];
+      }
+    },
+
+    sendMessage: async (conversationId, body, mode) => {
+      try {
+        const trimmed = body.trim();
+        if (!trimmed) return null;
+
+        console.log('[chatStore] sendMessage', { conversationId, mode, bodyLen: trimmed.length });
+
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) {
+          const details = safeErrorDetails(authError);
+          console.error('[chatStore] auth.getUser error', details);
+        }
+
+        const userId = authData.user?.id ?? null;
+
+        let senderType: MessageSenderType = 'user';
+        let senderId: string | null = null;
+
+        if (mode === 'public_guest') {
+          senderType = 'user';
+          senderId = null;
+        } else if (mode === 'public_auth') {
+          senderType = 'user';
+          senderId = userId;
+          if (!senderId) throw new Error('Not authenticated');
+        } else if (mode === 'private_user') {
+          senderType = 'user';
+          senderId = userId;
+          if (!senderId) throw new Error('Not authenticated');
+        } else if (mode === 'admin') {
+          senderType = 'admin';
+          senderId = userId;
+          if (!senderId) throw new Error('Not authenticated');
+        }
+
+        const { data, error } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversationId,
+            sender_type: senderType,
+            sender_id: senderId,
+            body: trimmed,
+          })
+          .select('id, conversation_id, sender_type, sender_id, body, created_at')
+          .single();
+
+        if (error) {
+          const details = safeErrorDetails(error);
+          console.error('[chatStore] sendMessage insert error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to send message');
+        }
+
+        const msg = mapMessageRow(data as MessageRow);
+
+        set((s) => {
+          const existing = s.messagesByConversationId[conversationId] ?? [];
+          return {
+            messagesByConversationId: {
+              ...s.messagesByConversationId,
+              [conversationId]: mergeMessages(existing, [msg]),
+            },
+          };
+        });
+
+        try {
+          const { error: updateError } = await supabase
+            .from('conversations')
+            .update({ last_message_at: new Date().toISOString() })
+            .eq('id', conversationId);
+
+          if (updateError) {
+            console.warn('[chatStore] conversations last_message_at update blocked/failed', safeErrorDetails(updateError));
+          }
+        } catch (e) {
+          console.warn('[chatStore] conversations last_message_at update unexpected error', safeErrorDetails(e));
+        }
+
+        return msg;
+      } catch (e) {
+        const details = safeErrorDetails(e);
+        console.error('[chatStore] sendMessage failed', details);
+        set({ error: (details.message as string | null) ?? 'Failed to send message' });
+        return null;
+      }
+    },
+
+    subscribeToConversation: (conversationId) => {
+      console.log('[chatStore] subscribeToConversation', { conversationId });
+
+      const existing = channelsByConversationId[conversationId];
+      if (existing) {
+        console.log('[chatStore] subscribeToConversation already subscribed', { conversationId });
+        return () => {
+          try {
+            console.log('[chatStore] unsubscribeToConversation (existing)', { conversationId });
+            supabase.removeChannel(existing);
+            delete channelsByConversationId[conversationId];
+            set((s) => ({
+              realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'closed' },
+              realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
+            }));
+          } catch (e) {
+            console.error('[chatStore] unsubscribeToConversation failed', safeErrorDetails(e));
+          }
+        };
       }
 
-      const { data: inserted, error: insertError } = await supabase
-        .from('conversations')
-        .insert({ type: 'public' })
-        .select('id, type, customer_id, created_at, last_message_at')
-        .single();
+      set((s) => ({
+        realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'connecting' },
+        realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
+      }));
 
-      if (insertError) {
-        const details = safeErrorDetails(insertError);
-        console.error('[chatStore] insert public conversation error', details);
-        throw new Error((details.message as string | null) ?? 'Failed to create public chat');
+      let channel: RealtimeChannel | null = null;
+
+      try {
+        channel = supabase
+          .channel(`messages:${conversationId}`)
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
+            (payload) => {
+              try {
+                const row = payload.new as unknown as MessageRow;
+                const msg = mapMessageRow(row);
+
+                console.log('[chatStore] realtime message INSERT', {
+                  conversationId,
+                  id: msg.id,
+                  senderType: msg.senderType,
+                });
+
+                set((s) => {
+                  const existingMessages = s.messagesByConversationId[conversationId] ?? [];
+                  const knownConv = s.conversations.find((c) => c.id === conversationId) ?? null;
+
+                  return {
+                    messagesByConversationId: {
+                      ...s.messagesByConversationId,
+                      [conversationId]: mergeMessages(existingMessages, [msg]),
+                    },
+                    conversations: upsertConversation(s.conversations, {
+                      id: conversationId,
+                      type: knownConv?.type ?? 'private',
+                      customerId: knownConv?.customerId ?? null,
+                      createdAt: knownConv?.createdAt ?? new Date().toISOString(),
+                      lastMessageAt: msg.createdAt,
+                    }),
+                  };
+                });
+              } catch (e) {
+                console.error('[chatStore] realtime payload handling failed', safeErrorDetails(e));
+              }
+            }
+          )
+          .subscribe((status) => {
+            console.log('[chatStore] realtime status', { conversationId, status });
+
+            if (status === 'SUBSCRIBED') {
+              set((s) => ({
+                realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'subscribed' },
+                realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
+              }));
+            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              set((s) => ({
+                realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
+                realtimeErrorByConversationId: {
+                  ...s.realtimeErrorByConversationId,
+                  [conversationId]: status === 'CHANNEL_ERROR' ? 'Realtime channel error' : 'Realtime timed out',
+                },
+              }));
+            } else if (status === 'CLOSED') {
+              set((s) => ({
+                realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'closed' },
+              }));
+            }
+          });
+
+        if (channel) {
+          channelsByConversationId[conversationId] = channel;
+        }
+      } catch (e) {
+        console.error('[chatStore] subscribeToConversation failed', safeErrorDetails(e));
+        set((s) => ({
+          realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
+          realtimeErrorByConversationId: {
+            ...s.realtimeErrorByConversationId,
+            [conversationId]: (safeErrorDetails(e).message as string | null) ?? 'Realtime subscribe failed',
+          },
+        }));
       }
 
-      const conv = mapConversationRow(inserted as ConversationRow);
-      set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
-      return conv;
-    } catch (e) {
-      const details = safeErrorDetails(e);
-      console.error('[chatStore] adminCreatePublicConversationIfMissing failed', details);
-      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to create public chat' });
-      return null;
-    }
-  },
-}));
+      return () => {
+        try {
+          if (channel) {
+            console.log('[chatStore] unsubscribeToConversation', { conversationId });
+            supabase.removeChannel(channel);
+            delete channelsByConversationId[conversationId];
+          }
+
+          set((s) => ({
+            realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'closed' },
+            realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
+          }));
+        } catch (e) {
+          console.error('[chatStore] unsubscribeToConversation failed', safeErrorDetails(e));
+        }
+      };
+    },
+
+    adminFetchConversations: async (limit) => {
+      set({ isLoading: true, error: null });
+
+      try {
+        console.log('[chatStore] adminFetchConversations', { limit });
+
+        const { data, error } = await supabase
+          .from('conversations')
+          .select('id, type, customer_id, created_at, last_message_at')
+          .order('last_message_at', { ascending: false })
+          .limit(limit);
+
+        if (error) {
+          const details = safeErrorDetails(error);
+          console.error('[chatStore] adminFetchConversations select error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to load conversations');
+        }
+
+        const rows = (data ?? []) as ConversationRow[];
+        const mapped = rows.map(mapConversationRow);
+
+        set((s) => {
+          let next = s.conversations;
+          for (const c of mapped) next = upsertConversation(next, c);
+          return { conversations: next, isLoading: false };
+        });
+
+        return mapped;
+      } catch (e) {
+        const details = safeErrorDetails(e);
+        console.error('[chatStore] adminFetchConversations failed', details);
+        set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load conversations' });
+        return [];
+      }
+    },
+
+    adminGetConversationById: async (conversationId) => {
+      set({ isLoading: true, error: null });
+
+      try {
+        console.log('[chatStore] adminGetConversationById', { conversationId });
+
+        const { data, error } = await supabase
+          .from('conversations')
+          .select('id, type, customer_id, created_at, last_message_at')
+          .eq('id', conversationId)
+          .single();
+
+        if (error) {
+          const details = safeErrorDetails(error);
+          console.error('[chatStore] adminGetConversationById select error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to load conversation');
+        }
+
+        const conv = mapConversationRow(data as ConversationRow);
+        set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
+        return conv;
+      } catch (e) {
+        const details = safeErrorDetails(e);
+        console.error('[chatStore] adminGetConversationById failed', details);
+        set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load conversation' });
+        return null;
+      }
+    },
+
+    adminCreatePublicConversationIfMissing: async () => {
+      set({ isLoading: true, error: null });
+
+      try {
+        console.log('[chatStore] adminCreatePublicConversationIfMissing');
+
+        const { data: existingData, error: existingError } = await supabase
+          .from('conversations')
+          .select('id, type, customer_id, created_at, last_message_at')
+          .eq('type', 'public')
+          .order('created_at', { ascending: true })
+          .limit(1);
+
+        if (existingError) {
+          const details = safeErrorDetails(existingError);
+          console.error('[chatStore] public conversations select error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to check public conversation');
+        }
+
+        const existingRow = (existingData?.[0] ?? null) as ConversationRow | null;
+        if (existingRow) {
+          const conv = mapConversationRow(existingRow);
+          set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
+          return conv;
+        }
+
+        const { data: inserted, error: insertError } = await supabase
+          .from('conversations')
+          .insert({ type: 'public' })
+          .select('id, type, customer_id, created_at, last_message_at')
+          .single();
+
+        if (insertError) {
+          const details = safeErrorDetails(insertError);
+          console.error('[chatStore] insert public conversation error', details);
+          throw new Error((details.message as string | null) ?? 'Failed to create public chat');
+        }
+
+        const conv = mapConversationRow(inserted as ConversationRow);
+        set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
+        return conv;
+      } catch (e) {
+        const details = safeErrorDetails(e);
+        console.error('[chatStore] adminCreatePublicConversationIfMissing failed', details);
+        set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to create public chat' });
+        return null;
+      }
+    },
+  };
+});
