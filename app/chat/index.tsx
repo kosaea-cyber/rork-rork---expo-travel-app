@@ -1,40 +1,46 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
-import { useChatStore, UIConversation as Conversation } from '@/store/chatStore';
+import { useChatStore, type Conversation } from '@/store/chatStore';
 import { useAuthStore } from '@/store/authStore';
 
 export default function ChatListScreen() {
   const router = useRouter();
-  const { conversations } = useChatStore();
-  const { user } = useAuthStore();
+  const { conversations, getPublicConversation, getOrCreatePrivateConversation } = useChatStore();
+  const { user, isAdmin } = useAuthStore();
 
-  if (!user) {
-    // Should be protected by router but safeguard
-    return (
-       <View style={styles.container}>
-         <Text style={styles.emptyText}>Please login to view messages.</Text>
-       </View>
-    );
-  }
+  useEffect(() => {
+    if (isAdmin) {
+      void getPublicConversation();
+      return;
+    }
+
+    if (user) {
+      void getOrCreatePrivateConversation();
+    } else {
+      void getPublicConversation();
+    }
+  }, [getOrCreatePrivateConversation, getPublicConversation, isAdmin, user]);
+
 
   const renderItem = ({ item }: { item: Conversation }) => (
-    <TouchableOpacity
-      style={styles.item}
-      onPress={() => router.push(`/(chat)/${item.id}` as any)}
-    >
+    <TouchableOpacity style={styles.item} onPress={() => router.push(`/chat/${item.id}` as any)}>
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>R</Text>
+        <Text style={styles.avatarText}>{item.type === 'public' ? 'P' : 'D'}</Text>
       </View>
       <View style={styles.content}>
         <View style={styles.header}>
-           <Text style={styles.subject} numberOfLines={1}>{item.subject}</Text>
-           <Text style={styles.time}>
-             {new Date(item.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-           </Text>
+          <Text style={styles.subject} numberOfLines={1}>
+            {item.type === 'public' ? 'Public chat' : 'Support'}
+          </Text>
+          <Text style={styles.time}>
+            {new Date(item.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
         </View>
-        <Text style={styles.preview} numberOfLines={1}>{item.lastMessage}</Text>
+        <Text style={styles.preview} numberOfLines={1}>
+          {item.type === 'public' ? 'Ask a question (guests allowed)' : 'Private conversation'}
+        </Text>
       </View>
     </TouchableOpacity>
   );

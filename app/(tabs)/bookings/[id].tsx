@@ -13,7 +13,8 @@ export default function BookingDetailsScreen() {
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
   const bookings = useBookingStore((state) => state.myBookings);
-  const createConversation = useChatStore((state) => state.createConversation);
+  const getOrCreatePrivateConversation = useChatStore((state) => state.getOrCreatePrivateConversation);
+  const sendMessage = useChatStore((state) => state.sendMessage);
   const user = useAuthStore((state) => state.user);
   
   const booking = bookings.find((b: BookingRow) => b.id === String(id));
@@ -26,18 +27,27 @@ export default function BookingDetailsScreen() {
     );
   }
 
-  const handleContact = () => {
-    if (!user) return;
-    // Create a new conversation about this booking
-    createConversation(
-      `Inquiry about booking #${booking.id}`, 
-      `Hello, I have a question about my booking (${booking.id}).`,
-      user.id,
-      user.name,
-      booking.id
-    );
-    // Navigate to chat list (simplest for now, or direct to chat)
-    router.push('/chat'); 
+  const handleContact = async () => {
+    try {
+      if (!user) return;
+
+      const conv = await getOrCreatePrivateConversation();
+      if (!conv) {
+        router.push('/chat');
+        return;
+      }
+
+      await sendMessage(
+        conv.id,
+        `Hello, I have a question about my booking (${booking.id}).`,
+        'private_user'
+      );
+
+      router.push(`/chat/${conv.id}` as any);
+    } catch (e) {
+      console.error('[BookingDetailsScreen] handleContact failed', e);
+      router.push('/chat');
+    }
   };
 
   return (

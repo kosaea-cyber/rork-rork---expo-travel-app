@@ -1,41 +1,94 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { Send } from 'lucide-react-native';
-import Colors from '@/constants/colors';
-import { useChatStore, Message } from '@/store/chatStore';
-import { useI18nStore } from '@/constants/i18n';
 
+import Colors from '@/constants/colors';
+import { useI18nStore } from '@/constants/i18n';
 import { useAuthStore } from '@/store/authStore';
+import { type Message, type SendMode, useChatStore } from '@/store/chatStore';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
   const t = useI18nStore((state) => state.t);
-  const { conversations, sendMessage } = useChatStore();
+
+  const conversationId = String(id ?? '');
+
+  const { conversations, messagesByConversationId, fetchMessages, sendMessage, subscribeToConversation } = useChatStore();
   const user = useAuthStore((state) => state.user);
-  
-  const conversation = conversations.find(c => c.id === id);
-  const [text, setText] = useState('');
-  const flatListRef = useRef<FlatList>(null);
+  const isAdmin = useAuthStore((state) => state.isAdmin);
+
+  const conversation = useMemo(
+    () => conversations.find((c) => c.id === conversationId) ?? null,
+    [conversationId, conversations]
+  );
+
+  const messages = messagesByConversationId[conversationId] ?? [];
+
+  const [text, setText] = useState<string>('');
+  const flatListRef = useRef<FlatList<Message>>(null);
+
+  const mode: SendMode = useMemo(() => {
+    if (isAdmin) return 'admin';
+    if (conversation?.type === 'public') return user ? 'public_auth' : 'public_guest';
+    return 'private_user';
+  }, [conversation?.type, isAdmin, user]);
 
   useEffect(() => {
-    // Scroll to bottom on load
+    if (!conversationId) return;
+    void fetchMessages(conversationId, 60);
+  }, [conversationId, fetchMessages]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const unsub = subscribeToConversation(conversationId);
+    return unsub;
+  }, [conversationId, subscribeToConversation]);
+
+  useEffect(() => {
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: false });
-    }, 100);
-  }, []);
+    }, 120);
+  }, [conversationId]);
 
   useEffect(() => {
-     // Scroll to bottom when messages change
-     if (conversation?.messages) {
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-     }
-  }, [conversation?.messages]);
+    if (!messages.length) return;
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 120);
+  }, [messages.length]);
 
-  if (!conversation) {
+  const handleSend = useCallback(async () => {
+    if (!conversationId) return;
+
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const sent = await sendMessage(conversationId, trimmed, mode);
+    if (sent) {
+      setText('');
+    }
+  }, [conversationId, mode, sendMessage, text]);
+
+  const renderMessage = useCallback(
+    ({ item }: { item: Message }) => {
+      const isUser = item.senderType === 'user' && item.senderId && item.senderId === user?.id;
+
+      return (
+        <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.adminMessage]}>
+          <Text style={[styles.messageText, isUser ? styles.userMessageText : styles.adminMessageText]}>
+            {item.body}
+          </Text>
+          <Text style={[styles.timeText, isUser ? styles.userTimeText : styles.adminTimeText]}>
+            {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </View>
+      );
+    },
+    [user?.id]
+  );
+
+  if (!conversationId) {
     return (
       <View style={styles.container}>
         <Text style={{ color: Colors.text }}>Conversation not found</Text>
@@ -43,53 +96,21 @@ export default function ChatScreen() {
     );
   }
 
-  const handleSend = () => {
-    if (!text.trim() || !user) return;
-    sendMessage(conversation.id, text.trim(), user.id);
-    setText('');
-  };
-
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isUser = item.senderId === user?.id;
-    return (
-      <View style={[
-        styles.messageContainer,
-        isUser ? styles.userMessage : styles.adminMessage
-      ]}>
-        <Text style={[
-          styles.messageText,
-          isUser ? styles.userMessageText : styles.adminMessageText
-        ]}>
-          {item.text}
-        </Text>
-        <Text style={[
-            styles.timeText,
-            isUser ? styles.userTimeText : styles.adminTimeText
-        ]}>
-            {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </Text>
-      </View>
-    );
-  };
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-         <Text style={styles.headerTitle}>{conversation.subject}</Text>
+        <Text style={styles.headerTitle}>{conversation?.type === 'public' ? 'Public chat' : 'Support chat'}</Text>
       </View>
-      
+
       <FlatList
         ref={flatListRef}
-        data={conversation.messages}
+        data={messages}
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
       />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
@@ -97,11 +118,13 @@ export default function ChatScreen() {
             onChangeText={setText}
             placeholder={t('sendMessage')}
             placeholderTextColor={Colors.textSecondary}
+            testID="chat.input"
           />
-          <TouchableOpacity 
-            style={[styles.sendButton, !text.trim() && styles.sendButtonDisabled]} 
+          <TouchableOpacity
+            style={[styles.sendButton, !text.trim() && styles.sendButtonDisabled]}
             onPress={handleSend}
             disabled={!text.trim()}
+            testID="chat.send"
           >
             <Send color={Colors.background} size={20} />
           </TouchableOpacity>
@@ -165,10 +188,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   userTimeText: {
-      color: 'rgba(10, 25, 47, 0.6)',
+    color: 'rgba(10, 25, 47, 0.6)',
   },
   adminTimeText: {
-      color: Colors.textSecondary,
+    color: Colors.textSecondary,
   },
   inputContainer: {
     flexDirection: 'row',
