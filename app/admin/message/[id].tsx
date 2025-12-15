@@ -35,8 +35,15 @@ export default function AdminConversationDetail() {
 
   const conversationId = String(id ?? '');
 
-  const { conversations, messagesByConversationId, adminGetConversationById, fetchMessages, sendMessage, subscribeToConversation } =
-    useChatStore();
+  const {
+    conversations,
+    messagesByConversationId,
+    adminGetConversationById,
+    fetchMessages,
+    sendMessage,
+    subscribeToConversation,
+    markConversationReadForAdmin,
+  } = useChatStore();
 
   const [ui, setUi] = useState<UiState>({ status: 'loading' });
   const [text, setText] = useState<string>('');
@@ -73,6 +80,11 @@ export default function AdminConversationDetail() {
     if (!conversationId) return;
     void load();
   }, [conversationId, load]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    void markConversationReadForAdmin(conversationId);
+  }, [conversationId, markConversationReadForAdmin]);
 
   useEffect(() => {
     if (!conversationId) return;

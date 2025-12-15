@@ -14,8 +14,16 @@ export default function ChatScreen() {
 
   const routeConversationId = String(id ?? '');
 
-  const { conversations, messagesByConversationId, fetchMessages, sendMessage, subscribeToConversation, getOrCreatePrivateConversation } =
-    useChatStore();
+  const {
+    conversations,
+    messagesByConversationId,
+    fetchMessages,
+    sendMessage,
+    subscribeToConversation,
+    getOrCreatePrivateConversation,
+    markConversationReadForAdmin,
+    markConversationReadForUser,
+  } = useChatStore();
   const user = useAuthStore((state) => state.user);
   const isAdmin = useAuthStore((state) => state.isAdmin);
 
@@ -70,6 +78,16 @@ export default function ChatScreen() {
     if (!conversationId) return;
     void fetchMessages(conversationId, 60);
   }, [conversationId, fetchMessages]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+
+    if (isAdmin) {
+      void markConversationReadForAdmin(conversationId);
+    } else {
+      void markConversationReadForUser(conversationId);
+    }
+  }, [conversationId, isAdmin, markConversationReadForAdmin, markConversationReadForUser]);
 
   useEffect(() => {
     if (!conversationId) return;

@@ -16,6 +16,10 @@ export interface Conversation {
   customerId: string | null;
   createdAt: string;
   lastMessageAt: string;
+  lastMessagePreview: string | null;
+  lastSenderType: MessageSenderType | null;
+  unreadCountAdmin: number;
+  unreadCountUser: number;
 }
 
 export interface Message {
@@ -33,6 +37,10 @@ type ConversationRow = {
   customer_id: string | null;
   created_at: string | null;
   last_message_at: string | null;
+  last_message_preview?: string | null;
+  last_sender_type?: MessageSenderType | null;
+  unread_count_admin?: number | null;
+  unread_count_user?: number | null;
 };
 
 type MessageRow = {
@@ -75,6 +83,10 @@ function mapConversationRow(row: ConversationRow): Conversation {
     customerId: row.customer_id ?? null,
     createdAt: row.created_at ?? nowIso,
     lastMessageAt: row.last_message_at ?? row.created_at ?? nowIso,
+    lastMessagePreview: row.last_message_preview ?? null,
+    lastSenderType: row.last_sender_type ?? null,
+    unreadCountAdmin: row.unread_count_admin ?? 0,
+    unreadCountUser: row.unread_count_user ?? 0,
   };
 }
 
@@ -118,6 +130,9 @@ interface ChatState {
   sendMessage: (conversationId: string, body: string, mode: SendMode) => Promise<Message | null>;
   subscribeToConversation: (conversationId: string) => () => void;
 
+  markConversationReadForUser: (conversationId: string) => Promise<void>;
+  markConversationReadForAdmin: (conversationId: string) => Promise<void>;
+
   adminFetchConversations: (limit: number) => Promise<Conversation[]>;
   adminGetConversationById: (conversationId: string) => Promise<Conversation | null>;
   adminCreatePublicConversationIfMissing: () => Promise<Conversation | null>;
@@ -142,7 +157,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const { data, error } = await supabase
           .from('conversations')
-          .select('id, type, customer_id, created_at, last_message_at')
+          .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .eq('type', 'public')
           .order('created_at', { ascending: true })
           .limit(1);
@@ -190,7 +205,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const { data: existingData, error: existingError } = await supabase
           .from('conversations')
-          .select('id, type, customer_id, created_at, last_message_at')
+          .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .eq('type', 'private')
           .eq('customer_id', userId)
           .order('last_message_at', { ascending: false })
@@ -212,7 +227,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         const { data: inserted, error: insertError } = await supabase
           .from('conversations')
           .insert({ type: 'private', customer_id: userId })
-          .select('id, type, customer_id, created_at, last_message_at')
+          .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .single();
 
         if (insertError) {
@@ -345,16 +360,20 @@ export const useChatStore = create<ChatState>((set, get) => {
         });
 
         try {
-          const { error: updateError } = await supabase
-            .from('conversations')
-            .update({ last_message_at: new Date().toISOString() })
-            .eq('id', conversationId);
+          const preview = trimmed.length > 80 ? trimmed.slice(0, 80) : trimmed;
+          const updatePayload: Partial<ConversationRow> = {
+            last_message_at: new Date().toISOString(),
+            last_message_preview: preview,
+            last_sender_type: senderType,
+          };
+
+          const { error: updateError } = await supabase.from('conversations').update(updatePayload).eq('id', conversationId);
 
           if (updateError) {
-            console.warn('[chatStore] conversations last_message_at update blocked/failed', safeErrorDetails(updateError));
+            console.warn('[chatStore] conversations metadata update blocked/failed (expected if trigger exists)', safeErrorDetails(updateError));
           }
         } catch (e) {
-          console.warn('[chatStore] conversations last_message_at update unexpected error', safeErrorDetails(e));
+          console.warn('[chatStore] conversations metadata update unexpected error', safeErrorDetails(e));
         }
 
         return msg;
@@ -426,6 +445,10 @@ export const useChatStore = create<ChatState>((set, get) => {
                       customerId: knownConv?.customerId ?? null,
                       createdAt: knownConv?.createdAt ?? new Date().toISOString(),
                       lastMessageAt: msg.createdAt,
+                      lastMessagePreview: msg.body.slice(0, 80),
+                      lastSenderType: msg.senderType,
+                      unreadCountAdmin: knownConv?.unreadCountAdmin ?? 0,
+                      unreadCountUser: knownConv?.unreadCountUser ?? 0,
                     }),
                   };
                 });
@@ -489,6 +512,54 @@ export const useChatStore = create<ChatState>((set, get) => {
       };
     },
 
+    markConversationReadForUser: async (conversationId: string) => {
+      if (!conversationId) return;
+
+      try {
+        console.log('[chatStore] markConversationReadForUser', { conversationId });
+        const { error } = await supabase.from('conversations').update({ unread_count_user: 0 }).eq('id', conversationId);
+
+        if (error) {
+          console.warn('[chatStore] markConversationReadForUser update error', safeErrorDetails(error));
+          return;
+        }
+
+        set((s) => {
+          const existing = s.conversations.find((c) => c.id === conversationId) ?? null;
+          if (!existing) return s;
+          return {
+            conversations: upsertConversation(s.conversations, { ...existing, unreadCountUser: 0 }),
+          };
+        });
+      } catch (e) {
+        console.warn('[chatStore] markConversationReadForUser unexpected error', safeErrorDetails(e));
+      }
+    },
+
+    markConversationReadForAdmin: async (conversationId: string) => {
+      if (!conversationId) return;
+
+      try {
+        console.log('[chatStore] markConversationReadForAdmin', { conversationId });
+        const { error } = await supabase.from('conversations').update({ unread_count_admin: 0 }).eq('id', conversationId);
+
+        if (error) {
+          console.warn('[chatStore] markConversationReadForAdmin update error', safeErrorDetails(error));
+          return;
+        }
+
+        set((s) => {
+          const existing = s.conversations.find((c) => c.id === conversationId) ?? null;
+          if (!existing) return s;
+          return {
+            conversations: upsertConversation(s.conversations, { ...existing, unreadCountAdmin: 0 }),
+          };
+        });
+      } catch (e) {
+        console.warn('[chatStore] markConversationReadForAdmin unexpected error', safeErrorDetails(e));
+      }
+    },
+
     adminFetchConversations: async (limit) => {
       set({ isLoading: true, error: null });
 
@@ -497,7 +568,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const { data, error } = await supabase
           .from('conversations')
-          .select('id, type, customer_id, created_at, last_message_at')
+          .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .order('last_message_at', { ascending: false })
           .limit(limit);
 
@@ -533,7 +604,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const { data, error } = await supabase
           .from('conversations')
-          .select('id, type, customer_id, created_at, last_message_at')
+          .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .eq('id', conversationId)
           .single();
 
@@ -562,7 +633,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const { data: existingData, error: existingError } = await supabase
           .from('conversations')
-          .select('id, type, customer_id, created_at, last_message_at')
+          .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .eq('type', 'public')
           .order('created_at', { ascending: true })
           .limit(1);
@@ -583,7 +654,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         const { data: inserted, error: insertError } = await supabase
           .from('conversations')
           .insert({ type: 'public' })
-          .select('id, type, customer_id, created_at, last_message_at')
+          .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .single();
 
         if (insertError) {

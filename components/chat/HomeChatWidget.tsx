@@ -49,6 +49,7 @@ export default function HomeChatWidget() {
     fetchMessages,
     subscribeToConversation,
     sendMessage,
+    markConversationReadForUser,
   } = useChatStore();
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -97,6 +98,7 @@ export default function HomeChatWidget() {
 
       setConversation(conv);
       await fetchMessages(conv.id, 30);
+      void markConversationReadForUser(conv.id);
       setIsBootstrapping(false);
 
       requestAnimationFrame(() => {
