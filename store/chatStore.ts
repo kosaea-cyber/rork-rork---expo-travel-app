@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
-import { useI18nStore } from '@/constants/i18n';
 import { aiProvider } from '@/lib/ai/provider';
 import { supabase } from '@/lib/supabase/client';
+import { resolveAutoReplyText, type ChatCategoryKey } from '@/lib/chat/autoReplyTemplates';
+import { useProfileStore } from '@/store/profileStore';
 
 export type ConversationType = 'private' | 'public';
 export type MessageSenderType = 'user' | 'admin' | 'system' | 'ai';
@@ -478,82 +479,62 @@ export const useChatStore = create<ChatState>((set, get) => {
               }
 
               if (settings.mode === 'auto_reply') {
-                let providerText: string | null = null;
+                let categoryKey: ChatCategoryKey = 'general';
 
                 try {
-                  providerText = await aiProvider.generateReply({
-                    conversationId,
-                    conversationType: convType,
-                    userMessage: trimmed,
-                    systemPrompt: settings.system_prompt ?? null,
-                  });
+                  const knownConv = get().conversations.find((c) => c.id === conversationId) ?? null;
+
+                  if (convType === 'public') {
+                    categoryKey = 'general';
+                  } else {
+                    if (knownConv?.type === 'private') {
+                      categoryKey = 'general';
+                    } else {
+                      categoryKey = 'general';
+                    }
+                  }
                 } catch (e) {
-                  console.warn('[chatStore] aiProvider.generateReply failed (non-fatal)', safeErrorDetails(e));
-                  providerText = null;
+                  console.warn('[chatStore] category detection failed; falling back to general', safeErrorDetails(e));
+                  categoryKey = 'general';
                 }
 
-                const reply = providerText?.trim() ? providerText.trim() : null;
+                const preferredLanguage = useProfileStore.getState().preferredLanguage ?? 'en';
+                const autoBody = resolveAutoReplyText({ categoryKey, preferredLanguage });
 
-                if (reply) {
-                  const insertAiRes = await supabase
+                try {
+                  const insertRes = await supabase
                     .from('messages')
                     .insert({
                       conversation_id: conversationId,
-                      sender_type: 'ai',
+                      sender_type: 'system',
                       sender_id: null,
-                      body: reply,
+                      body: autoBody,
                     })
                     .select('id, conversation_id, sender_type, sender_id, body, created_at')
                     .single();
 
-                  if (insertAiRes.error) {
-                    console.warn('[chatStore] AI reply insert failed; falling back to stub', safeErrorDetails(insertAiRes.error));
-                  } else if (insertAiRes.data) {
-                    const aiMsg = mapMessageRow(insertAiRes.data as MessageRow);
+                  if (insertRes.error) {
+                    console.error('[chatStore] auto-reply template insert failed (non-fatal)', safeErrorDetails(insertRes.error));
+                  } else if (insertRes.data) {
+                    const systemMsg = mapMessageRow(insertRes.data as MessageRow);
                     set((s) => {
                       const existing = s.messagesByConversationId[conversationId] ?? [];
                       return {
                         messagesByConversationId: {
                           ...s.messagesByConversationId,
-                          [conversationId]: mergeMessages(existing, [aiMsg]),
+                          [conversationId]: mergeMessages(existing, [systemMsg]),
                         },
                       };
                     });
-
-                    await bestEffortInsertAiLog({ status: 'skipped', request_json: { reason: 'provider_returned_text' } });
-                    return;
                   }
+                } catch (e) {
+                  console.error('[chatStore] auto-reply template insert unexpected error (non-fatal)', safeErrorDetails(e));
                 }
 
-                const autoBody = useI18nStore.getState().t('chatAutoReplyStub');
+                await bestEffortInsertAiLog({ status: 'skipped', request_json: { reason: 'stub_template' } });
 
-                const insertRes = await supabase
-                  .from('messages')
-                  .insert({
-                    conversation_id: conversationId,
-                    sender_type: 'system',
-                    sender_id: null,
-                    body: autoBody,
-                  })
-                  .select('id, conversation_id, sender_type, sender_id, body, created_at')
-                  .single();
-
-                if (insertRes.error) {
-                  console.warn('[chatStore] auto-reply message insert failed', safeErrorDetails(insertRes.error));
-                } else if (insertRes.data) {
-                  const systemMsg = mapMessageRow(insertRes.data as MessageRow);
-                  set((s) => {
-                    const existing = s.messagesByConversationId[conversationId] ?? [];
-                    return {
-                      messagesByConversationId: {
-                        ...s.messagesByConversationId,
-                        [conversationId]: mergeMessages(existing, [systemMsg]),
-                      },
-                    };
-                  });
-                }
-
-                await bestEffortInsertAiLog({ status: 'skipped', request_json: { reason: 'stub' } });
+                void aiProvider;
+                void settings;
               }
             } catch (e) {
               console.warn('[chatStore] auto-reply flow failed (non-fatal)', safeErrorDetails(e));
