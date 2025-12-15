@@ -1,112 +1,162 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import Colors from '@/constants/colors';
-import { db } from '@/lib/db';
-import { Conversation, User } from '@/lib/db/types';
+import { MessageCirclePlus, RefreshCw } from 'lucide-react-native';
 
-export default function MessagesPage() {
+import colors from '@/constants/colors';
+import { type Conversation, useChatStore } from '@/store/chatStore';
+
+type RowItem = Conversation;
+
+type UiState =
+  | { status: 'loading' }
+  | { status: 'ready' }
+  | { status: 'error'; message: string };
+
+const PAGE_LIMIT = 60;
+
+function formatCustomer(customerId: string | null): string {
+  if (!customerId) return '—';
+  if (customerId.length <= 10) return customerId;
+  return `${customerId.slice(0, 6)}…${customerId.slice(-4)}`;
+}
+
+export default function AdminMessagesPage() {
   const router = useRouter();
-  const [conversations, setConversations] = useState<(Conversation & { customerName: string })[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const { adminFetchConversations, adminCreatePublicConversationIfMissing } = useChatStore();
+
+  const [items, setItems] = useState<RowItem[]>([]);
+  const [ui, setUi] = useState<UiState>({ status: 'loading' });
+
+  const load = useCallback(async () => {
+    setUi({ status: 'loading' });
 
     try {
-      console.log('[admin/messages] loadData');
-      const convs = await db.conversations.findMany();
-
-      const enriched = await Promise.all(
-        convs.map(async (c) => {
-          const u = await db.users.findUnique({ id: c.customerId });
-          return { ...c, customerName: u ? u.name : 'Unknown User' };
-        })
-      );
-
-      setConversations(enriched);
+      console.log('[admin/messages] load conversations');
+      const data = await adminFetchConversations(PAGE_LIMIT);
+      setItems(data);
+      setUi({ status: 'ready' });
     } catch (e) {
-      console.error('[admin/messages] loadData error', e);
-      setConversations([]);
-      setError('Failed to load messages. Please try again.');
-    } finally {
-      setLoading(false);
+      console.error('[admin/messages] load failed', e);
+      setItems([]);
+      setUi({ status: 'error', message: 'Failed to load conversations. Please try again.' });
     }
-  }, []);
+  }, [adminFetchConversations]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    void load();
+  }, [load]);
 
-  const renderItem = useCallback(
-    ({ item }: { item: Conversation & { customerName: string } }) => (
-      <TouchableOpacity
-        testID={`admin-message-thread-${item.id}`}
-        style={styles.card}
-        onPress={() => router.push(`/admin/message/${item.id}`)}
-      >
-        <View style={styles.header}>
-          <Text style={styles.subject} numberOfLines={1}>
-            {item.subject}
-          </Text>
-          <Text style={styles.date}>{new Date(item.lastMessageAt).toLocaleDateString()}</Text>
-        </View>
-        <Text style={styles.customer} numberOfLines={1}>
-          {item.customerName}
-        </Text>
-        <View style={[styles.badge, { backgroundColor: item.status === 'open' ? '#4CAF50' : '#999' }]}>
-          <Text style={styles.badgeText}>{item.status}</Text>
-        </View>
-      </TouchableOpacity>
-    ),
-    [router]
-  );
+  const onCreatePublic = useCallback(async () => {
+    setUi({ status: 'loading' });
 
-  const listEmpty = useMemo(() => {
-    if (loading) {
+    try {
+      console.log('[admin/messages] create public chat');
+      const conv = await adminCreatePublicConversationIfMissing();
+      if (conv) {
+        await load();
+        router.push(`/admin/message/${conv.id}`);
+        return;
+      }
+
+      setUi({ status: 'error', message: 'Could not create public chat. Please try again.' });
+    } catch (e) {
+      console.error('[admin/messages] create public chat failed', e);
+      setUi({ status: 'error', message: 'Could not create public chat. Please try again.' });
+    }
+  }, [adminCreatePublicConversationIfMissing, load, router]);
+
+  const header = useMemo(() => {
+    return (
+      <View style={styles.headerWrap}>
+        <View style={styles.headerTop}>
+          <Text style={styles.title}>Conversations</Text>
+          <Pressable testID="adminMessages.createPublic" style={styles.createBtn} onPress={onCreatePublic}>
+            <MessageCirclePlus size={18} color={colors.background} />
+            <Text style={styles.createBtnText}>Create Public Chat</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.legendRow}>
+          <Text style={[styles.legendCell, { flex: 0.9 }]}>Type</Text>
+          <Text style={[styles.legendCell, { flex: 1.35 }]}>Customer</Text>
+          <Text style={[styles.legendCell, { flex: 1.1, textAlign: 'right' }]}>Last</Text>
+        </View>
+      </View>
+    );
+  }, [onCreatePublic]);
+
+  const empty = useMemo(() => {
+    if (ui.status === 'loading') {
       return (
-        <View style={styles.stateWrap} testID="adminMessagesLoading">
-          <ActivityIndicator color={Colors.tint} />
-          <Text style={styles.stateText}>Loading messages…</Text>
+        <View style={styles.stateWrap} testID="adminMessages.loading">
+          <ActivityIndicator color={colors.tint} />
+          <Text style={styles.stateTitle}>Loading conversations…</Text>
         </View>
       );
     }
 
-    if (error) {
+    if (ui.status === 'error') {
       return (
-        <View style={styles.stateWrap} testID="adminMessagesError">
-          <Text style={styles.stateTitle}>Couldn’t load messages</Text>
-          <Text style={styles.stateText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={loadData} testID="adminMessagesRetry">
+        <View style={styles.stateWrap} testID="adminMessages.error">
+          <Text style={styles.stateTitle}>Couldn’t load conversations</Text>
+          <Text style={styles.stateText}>{ui.message}</Text>
+          <Pressable testID="adminMessages.retry" style={styles.retryBtn} onPress={load}>
+            <RefreshCw size={16} color={colors.background} />
             <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       );
     }
 
     return (
-      <View style={styles.empty} testID="adminMessagesEmpty">
-        <Text style={styles.emptyText}>No conversations yet</Text>
+      <View style={styles.stateWrap} testID="adminMessages.empty">
+        <Text style={styles.stateTitle}>No conversations yet</Text>
+        <Text style={styles.stateText}>Create a public chat, or wait for customers to message you.</Text>
       </View>
     );
-  }, [error, loadData, loading]);
+  }, [load, ui]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: RowItem }) => {
+      const chipBg = item.type === 'public' ? '#1D4ED8' : '#0F766E';
+      const last = item.lastMessageAt ? new Date(item.lastMessageAt).toLocaleString() : '—';
+
+      return (
+        <Pressable
+          testID={`adminMessages.row.${item.id}`}
+          style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push(`/admin/message/${item.id}`)}
+        >
+          <View style={[styles.typeChip, { backgroundColor: chipBg }]}>
+            <Text style={styles.typeChipText}>{item.type}</Text>
+          </View>
+
+          <Text style={styles.customerText} numberOfLines={1}>
+            {formatCustomer(item.customerId)}
+          </Text>
+
+          <Text style={styles.lastText} numberOfLines={1}>
+            {last}
+          </Text>
+        </Pressable>
+      );
+    },
+    [router]
+  );
 
   return (
     <View style={styles.container}>
-      <View style={styles.pageHeader}>
-        <Text style={styles.title}>Messages</Text>
-      </View>
-
       <FlatList
-        data={conversations}
+        data={items}
         renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        refreshing={loading}
-        onRefresh={loadData}
-        ListEmptyComponent={listEmpty}
+        keyExtractor={(it) => it.id}
+        ListHeaderComponent={header}
+        ListEmptyComponent={empty}
+        contentContainerStyle={styles.listContent}
+        refreshing={ui.status === 'loading'}
+        onRefresh={load}
       />
     </View>
   );
@@ -115,99 +165,126 @@ export default function MessagesPage() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: colors.background,
   },
-  pageHeader: {
-    padding: 20,
-    backgroundColor: Colors.background,
+  listContent: {
+    paddingBottom: 20,
+  },
+  headerWrap: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
+    backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: colors.border,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.tint,
-  },
-  list: {
-    padding: 16,
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 12,
   },
-  card: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
-    gap: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+  title: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: colors.text,
   },
-  header: {
+  createBtn: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    height: 36,
+    borderRadius: 999,
+    backgroundColor: colors.tint,
   },
-  subject: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+  createBtnText: {
+    color: colors.background,
+    fontWeight: '900',
+    fontSize: 13,
   },
-  date: {
+  legendRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  legendCell: {
+    color: colors.textSecondary,
     fontSize: 12,
-    color: '#999',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
-  customer: {
-    color: '#666',
-    fontSize: 14,
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.background,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 4,
+  typeChip: {
+    flex: 0.9,
+    maxWidth: 88,
+    height: 26,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
   },
-  badgeText: {
+  typeChipText: {
     color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '900',
     textTransform: 'uppercase',
   },
-  empty: {
-    padding: 40,
-    alignItems: 'center',
+  customerText: {
+    flex: 1.35,
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 13,
   },
-  emptyText: {
-    color: '#666',
-    fontWeight: '600',
+  lastText: {
+    flex: 1.1,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   stateWrap: {
-    padding: 40,
+    padding: 32,
     alignItems: 'center',
     gap: 10,
   },
   stateTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
+    fontWeight: '900',
+    fontSize: 15,
     textAlign: 'center',
   },
   stateText: {
+    color: colors.textSecondary,
+    fontWeight: '700',
     fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 18,
   },
   retryBtn: {
     marginTop: 6,
-    backgroundColor: Colors.tint,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    height: 40,
     borderRadius: 999,
+    backgroundColor: colors.tint,
   },
   retryText: {
-    color: Colors.background,
-    fontWeight: '800',
+    color: colors.background,
+    fontWeight: '900',
+    fontSize: 13,
   },
 });

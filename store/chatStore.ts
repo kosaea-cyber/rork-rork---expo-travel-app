@@ -113,6 +113,10 @@ interface ChatState {
   fetchMessages: (conversationId: string, limit: number, before?: string) => Promise<Message[]>;
   sendMessage: (conversationId: string, body: string, mode: SendMode) => Promise<Message | null>;
   subscribeToConversation: (conversationId: string) => () => void;
+
+  adminFetchConversations: (limit: number) => Promise<Conversation[]>;
+  adminGetConversationById: (conversationId: string) => Promise<Conversation | null>;
+  adminCreatePublicConversationIfMissing: () => Promise<Conversation | null>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -382,6 +386,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     ...s.messagesByConversationId,
                     [conversationId]: mergeMessages(existing, [msg]),
                   },
+                  conversations: upsertConversation(
+                    s.conversations,
+                    {
+                      id: conversationId,
+                      type: s.conversations.find((c) => c.id === conversationId)?.type ?? 'private',
+                      customerId: s.conversations.find((c) => c.id === conversationId)?.customerId ?? null,
+                      createdAt: s.conversations.find((c) => c.id === conversationId)?.createdAt ?? new Date().toISOString(),
+                      lastMessageAt: msg.createdAt,
+                    }
+                  ),
                 };
               });
             } catch (e) {
@@ -406,5 +420,119 @@ export const useChatStore = create<ChatState>((set, get) => ({
         console.error('[chatStore] unsubscribeToConversation failed', safeErrorDetails(e));
       }
     };
+  },
+
+  adminFetchConversations: async (limit) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      console.log('[chatStore] adminFetchConversations', { limit });
+
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('id, type, customer_id, created_at, last_message_at')
+        .order('last_message_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        const details = safeErrorDetails(error);
+        console.error('[chatStore] adminFetchConversations select error', details);
+        throw new Error((details.message as string | null) ?? 'Failed to load conversations');
+      }
+
+      const rows = (data ?? []) as ConversationRow[];
+      const mapped = rows.map(mapConversationRow);
+
+      set((s) => {
+        let next = s.conversations;
+        for (const c of mapped) next = upsertConversation(next, c);
+        return { conversations: next, isLoading: false };
+      });
+
+      return mapped;
+    } catch (e) {
+      const details = safeErrorDetails(e);
+      console.error('[chatStore] adminFetchConversations failed', details);
+      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load conversations' });
+      return [];
+    }
+  },
+
+  adminGetConversationById: async (conversationId) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      console.log('[chatStore] adminGetConversationById', { conversationId });
+
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('id, type, customer_id, created_at, last_message_at')
+        .eq('id', conversationId)
+        .single();
+
+      if (error) {
+        const details = safeErrorDetails(error);
+        console.error('[chatStore] adminGetConversationById select error', details);
+        throw new Error((details.message as string | null) ?? 'Failed to load conversation');
+      }
+
+      const conv = mapConversationRow(data as ConversationRow);
+      set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
+      return conv;
+    } catch (e) {
+      const details = safeErrorDetails(e);
+      console.error('[chatStore] adminGetConversationById failed', details);
+      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load conversation' });
+      return null;
+    }
+  },
+
+  adminCreatePublicConversationIfMissing: async () => {
+    set({ isLoading: true, error: null });
+
+    try {
+      console.log('[chatStore] adminCreatePublicConversationIfMissing');
+
+      const { data: existingData, error: existingError } = await supabase
+        .from('conversations')
+        .select('id, type, customer_id, created_at, last_message_at')
+        .eq('type', 'public')
+        .order('created_at', { ascending: true })
+        .limit(1);
+
+      if (existingError) {
+        const details = safeErrorDetails(existingError);
+        console.error('[chatStore] public conversations select error', details);
+        throw new Error((details.message as string | null) ?? 'Failed to check public conversation');
+      }
+
+      const existingRow = (existingData?.[0] ?? null) as ConversationRow | null;
+      if (existingRow) {
+        const conv = mapConversationRow(existingRow);
+        set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
+        return conv;
+      }
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('conversations')
+        .insert({ type: 'public' })
+        .select('id, type, customer_id, created_at, last_message_at')
+        .single();
+
+      if (insertError) {
+        const details = safeErrorDetails(insertError);
+        console.error('[chatStore] insert public conversation error', details);
+        throw new Error((details.message as string | null) ?? 'Failed to create public chat');
+      }
+
+      const conv = mapConversationRow(inserted as ConversationRow);
+      set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
+      return conv;
+    } catch (e) {
+      const details = safeErrorDetails(e);
+      console.error('[chatStore] adminCreatePublicConversationIfMissing failed', details);
+      set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to create public chat' });
+      return null;
+    }
   },
 }));
