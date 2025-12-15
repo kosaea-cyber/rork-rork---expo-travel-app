@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
-import { useBookingStore } from '@/store/bookingStore';
+import { type BookingRow, useBookingStore } from '@/store/bookingStore';
 import { useChatStore } from '@/store/chatStore';
 
 import { useAuthStore } from '@/store/authStore';
@@ -12,11 +12,11 @@ export default function BookingDetailsScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
-  const bookings = useBookingStore((state) => state.bookings);
+  const bookings = useBookingStore((state) => state.myBookings);
   const createConversation = useChatStore((state) => state.createConversation);
   const user = useAuthStore((state) => state.user);
   
-  const booking = bookings.find(b => b.id === id);
+  const booking = bookings.find((b: BookingRow) => b.id === String(id));
 
   if (!booking) {
     return (
@@ -31,7 +31,7 @@ export default function BookingDetailsScreen() {
     // Create a new conversation about this booking
     createConversation(
       `Inquiry about booking #${booking.id}`, 
-      `Hello, I have a question about my booking for ${booking.packageTitle}.`,
+      `Hello, I have a question about my booking (${booking.id}).`,
       user.id,
       user.name,
       booking.id
@@ -43,30 +43,25 @@ export default function BookingDetailsScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.card}>
-        <Text style={styles.label}>Booking Reference</Text>
+        <Text style={styles.label}>Booking ID</Text>
         <Text style={styles.value}>{booking.id}</Text>
         
         <View style={styles.divider} />
         
-        <Text style={styles.label}>Package</Text>
-        <Text style={styles.value}>{booking.packageTitle}</Text>
-
-        <View style={styles.divider} />
-
         <Text style={styles.label}>Status</Text>
         <Text style={[styles.value, { color: Colors.tint }]}>{t(booking.status)}</Text>
 
         <View style={styles.divider} />
 
-        <Text style={styles.label}>Dates</Text>
-        <Text style={styles.value}>{booking.startDate} - {booking.endDate}</Text>
+        <Text style={styles.label}>Created</Text>
+        <Text style={styles.value}>{new Date(booking.created_at).toLocaleString()}</Text>
 
         <View style={styles.divider} />
 
-        <Text style={styles.label}>Travelers</Text>
-        <Text style={styles.value}>{booking.travelers}</Text>
+        <Text style={styles.label}>User</Text>
+        <Text style={styles.value}>{booking.user_id}</Text>
 
-        {booking.notes ? (
+        {booking.notes?.trim() ? (
           <>
             <View style={styles.divider} />
             <Text style={styles.label}>Notes</Text>

@@ -44,7 +44,7 @@ export default function BookingRequestScreen() {
   const preferredLanguage = useProfileStore((s) => s.preferredLanguage);
   const language = (preferredLanguage ?? fallbackLanguage ?? 'en') as PreferredLanguage;
 
-  const addBooking = useBookingStore((state) => state.addBooking);
+  const createBooking = useBookingStore((state) => state.createBooking);
   const isLoading = useBookingStore((state) => state.isLoading);
   const user = useAuthStore((state) => state.user);
 
@@ -90,24 +90,26 @@ export default function BookingRequestScreen() {
   const handleRequest = useCallback(async () => {
     if (!startDate || !pkg || !user) return;
 
-    await addBooking({
-      packageId: pkg.id,
-      packageTitle: pkgTitle,
-      startDate: startDate,
-      endDate: 'TBD',
-      travelers: parseInt(travelers, 10) || 1,
-      notes,
-      customerId: user.id,
-      customerName: user.name,
-      customerEmail: user.email,
-      type: ((pkg.category_id ?? 'service').charAt(0).toUpperCase() + (pkg.category_id ?? 'service').slice(1)) as any,
-      serviceCategoryId: pkg.category_id ?? '',
-    });
+    const finalNotes = [
+      `Package: ${pkgTitle} (${pkg.id})`,
+      `Preferred start date: ${startDate}`,
+      `Travelers: ${parseInt(travelers, 10) || 1}`,
+      notes?.trim() ? `Notes: ${notes.trim()}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const created = await createBooking({ notes: finalNotes });
+
+    if (!created) {
+      Alert.alert(t('somethingWentWrong') ?? 'Something went wrong', t('retry') ?? 'Please try again');
+      return;
+    }
 
     Alert.alert('Success', t('bookingRequestSent') ?? 'Booking request sent', [
       { text: 'OK', onPress: () => router.navigate('/(tabs)/bookings') },
     ]);
-  }, [addBooking, notes, pkg, pkgTitle, router, startDate, t, travelers, user]);
+  }, [createBooking, notes, pkg, pkgTitle, router, startDate, t, travelers, user]);
 
   if (!packageId) {
     return (

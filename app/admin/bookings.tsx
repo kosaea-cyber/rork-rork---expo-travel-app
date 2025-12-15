@@ -1,76 +1,25 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
 import Colors from '@/constants/colors';
-import { Booking } from '@/lib/db/types';
-import { supabase } from '@/lib/supabase/client';
-
-type BookingRow = {
-  id: string;
-  reference: string | null;
-  customer_id: string | null;
-  customer_name: string | null;
-  customer_email: string | null;
-  package_id: string | null;
-  package_title: string | null;
-  service_category_id: string | null;
-  status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | null;
-  start_date: string | null;
-  end_date: string | null;
-  travelers: number | null;
-  notes: string | null;
-  created_at: string | null;
-  type: string | null;
-};
-
-function mapBookingRow(row: BookingRow): Booking {
-  return {
-    id: row.id,
-    reference: row.reference ?? '',
-    customerId: row.customer_id ?? '',
-    customerName: row.customer_name ?? undefined,
-    customerEmail: row.customer_email ?? undefined,
-    packageId: row.package_id ?? undefined,
-    packageTitle: row.package_title ?? undefined,
-    serviceCategoryId: row.service_category_id ?? '',
-    status: (row.status ?? 'pending') as Booking['status'],
-    startDate: row.start_date ?? '',
-    endDate: row.end_date ?? '',
-    travelers: row.travelers ?? 0,
-    notes: row.notes ?? undefined,
-    createdAt: row.created_at ?? '',
-    type: row.type ?? undefined,
-  };
-}
+import { type BookingRow, useBookingStore } from '@/store/bookingStore';
 
 export default function BookingsPage() {
   const router = useRouter();
   const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed' | 'cancelled'>('all');
 
-  const bookingsQuery = useQuery({
-    queryKey: ['admin', 'bookings'],
-    queryFn: async (): Promise<Booking[]> => {
-      console.log('[admin/bookings] loading bookings from supabase');
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*')
-        .order('created_at', { ascending: false });
+  const adminBookings = useBookingStore((s) => s.adminBookings);
+  const isLoading = useBookingStore((s) => s.isLoading);
+  const error = useBookingStore((s) => s.error);
+  const adminFetchAllBookings = useBookingStore((s) => s.adminFetchAllBookings);
 
-      if (error) {
-        console.error('[admin/bookings] supabase error', error);
-        throw new Error(error.message);
-      }
-
-      const rows: BookingRow[] = (data ?? []) as BookingRow[];
-      return rows.map(mapBookingRow);
-    },
-  });
+  useEffect(() => {
+    adminFetchAllBookings();
+  }, [adminFetchAllBookings]);
 
   const filtered = useMemo(() => {
-    const bookings: Booking[] = bookingsQuery.data ?? [];
-    return bookings.filter((b: Booking) => (filter === 'all' ? true : b.status === filter));
-  }, [bookingsQuery.data, filter]);
+    return adminBookings.filter((b) => (filter === 'all' ? true : b.status === filter));
+  }, [adminBookings, filter]);
 
   const getStatusColor = (status: string) => {
     switch(status) {
@@ -81,15 +30,15 @@ export default function BookingsPage() {
     }
   };
 
-  const renderItem = ({ item }: { item: Booking }) => (
-    <TouchableOpacity 
-      style={styles.card}
-      onPress={() => router.push(`/admin/booking/${item.id}`)}
-    >
+  const renderItem = ({ item }: { item: BookingRow }) => (
+    <TouchableOpacity style={styles.card} onPress={() => router.push(`/admin/booking/${item.id}`)} testID={`admin-booking-${item.id}`}>
       <View style={styles.row}>
-        <View>
-          <Text style={styles.ref}>{item.reference}</Text>
-          <Text style={styles.date}>{new Date(item.startDate).toLocaleDateString()} - {new Date(item.endDate).toLocaleDateString()}</Text>
+        <View style={{ flex: 1, paddingRight: 10 }}>
+          <Text style={styles.ref}>#{item.id.slice(0, 8)}</Text>
+          <Text style={styles.date}>{new Date(item.created_at).toLocaleString()}</Text>
+          <Text style={styles.userId} numberOfLines={1}>
+            user: {item.user_id}
+          </Text>
         </View>
         <View style={[styles.badge, { backgroundColor: getStatusColor(item.status) }]}>
           <Text style={styles.badgeText}>{item.status}</Text>
@@ -118,15 +67,13 @@ export default function BookingsPage() {
         ))}
       </View>
 
-      {bookingsQuery.isLoading ? (
+      {isLoading ? (
         <ActivityIndicator size="large" color={Colors.tint} style={{ marginTop: 50 }} testID="adminBookingsLoading" />
-      ) : bookingsQuery.isError ? (
+      ) : error ? (
         <View style={styles.empty} testID="adminBookingsError">
           <Text style={styles.emptyText}>Failed to load bookings.</Text>
-          <Text style={[styles.emptyText, { marginTop: 6, fontSize: 12 }]}>
-            {(bookingsQuery.error as Error | undefined)?.message ?? 'Unknown error'}
-          </Text>
-          <TouchableOpacity style={[styles.tab, { marginTop: 16 }]} onPress={() => bookingsQuery.refetch()} testID="adminBookingsRetry">
+          <Text style={[styles.emptyText, { marginTop: 6, fontSize: 12 }]}>{error.message}</Text>
+          <TouchableOpacity style={[styles.tab, { marginTop: 16 }]} onPress={() => adminFetchAllBookings()} testID="adminBookingsRetry">
             <Text style={styles.tabText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -137,11 +84,7 @@ export default function BookingsPage() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           refreshControl={
-            <RefreshControl
-              refreshing={bookingsQuery.isFetching}
-              onRefresh={() => bookingsQuery.refetch()}
-              tintColor={Colors.tint}
-            />
+            <RefreshControl refreshing={isLoading} onRefresh={() => adminFetchAllBookings()} tintColor={Colors.tint} />
           }
           ListEmptyComponent={
             <View style={styles.empty} testID="adminBookingsEmpty">
@@ -220,6 +163,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 4,
+  },
+  userId: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 6,
   },
   badge: {
     paddingHorizontal: 8,

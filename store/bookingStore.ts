@@ -1,192 +1,187 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase/client';
-import type { Booking } from '@/lib/db/types';
 
-type BookingInsertInput = Omit<Booking, 'id' | 'status' | 'createdAt' | 'reference'>;
+export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed';
 
-type BookingRow = {
+export type BookingRow = {
   id: string;
-  reference: string | null;
-  customer_id: string | null;
-  customer_name: string | null;
-  customer_email: string | null;
-  package_id: string | null;
-  package_title: string | null;
-  service_category_id: string | null;
-  status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | null;
-  start_date: string | null;
-  end_date: string | null;
-  travelers: number | null;
+  user_id: string;
+  status: BookingStatus;
   notes: string | null;
-  created_at: string | null;
-  type: string | null;
+  created_at: string;
+  updated_at: string | null;
 };
 
-function mapBookingRow(row: BookingRow): Booking {
-  return {
-    id: row.id,
-    reference: row.reference ?? '',
-    customerId: row.customer_id ?? '',
-    customerName: row.customer_name ?? undefined,
-    customerEmail: row.customer_email ?? undefined,
-    packageId: row.package_id ?? undefined,
-    packageTitle: row.package_title ?? undefined,
-    serviceCategoryId: row.service_category_id ?? '',
-    status: (row.status ?? 'pending') as Booking['status'],
-    startDate: row.start_date ?? '',
-    endDate: row.end_date ?? '',
-    travelers: row.travelers ?? 0,
-    notes: row.notes ?? undefined,
-    createdAt: row.created_at ?? '',
-    type: row.type ?? undefined,
-  };
+export type CreateBookingPayload = {
+  notes: string;
+};
+
+type StoreError = {
+  message: string;
+} | null;
+
+async function getAuthedUserId(): Promise<string> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) {
+    console.error('[bookingStore] auth.getUser error', error.message);
+  }
+
+  const userId = data.user?.id ?? '';
+  if (!userId) throw new Error('Not authenticated');
+  return userId;
 }
 
-function makeReference(): string {
-  const now = new Date();
-  const y = String(now.getFullYear()).slice(-2);
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `BK-${y}${m}${d}-${rand}`;
+async function assertAdmin(): Promise<void> {
+  const userId = await getAuthedUserId();
+
+  const profileRes = await supabase
+    .from('profiles')
+    .select('id, role')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (profileRes.error) {
+    console.error('[bookingStore] profiles select error', profileRes.error.message);
+    throw new Error(profileRes.error.message);
+  }
+
+  const role = (profileRes.data?.role ?? 'customer') as 'admin' | 'customer';
+  if (role !== 'admin') {
+    throw new Error('Admin only');
+  }
 }
 
 interface BookingState {
-  bookings: Booking[];
+  myBookings: BookingRow[];
+  adminBookings: BookingRow[];
   isLoading: boolean;
-  addBooking: (bookingData: BookingInsertInput) => Promise<void>;
-  updateBooking: (id: string, updates: Partial<Booking>) => Promise<void>;
-  fetchBookings: (customerId?: string) => Promise<void>;
+  error: StoreError;
+
+  fetchMyBookings: () => Promise<void>;
+  createBooking: (payload: CreateBookingPayload) => Promise<BookingRow | null>;
+
+  adminFetchAllBookings: () => Promise<void>;
+  updateBookingStatus: (id: string, status: BookingStatus) => Promise<BookingRow | null>;
 }
 
 export const useBookingStore = create<BookingState>((set, get) => ({
-  bookings: [],
+  myBookings: [],
+  adminBookings: [],
   isLoading: false,
+  error: null,
 
-  addBooking: async (data) => {
-    set({ isLoading: true });
+  fetchMyBookings: async () => {
+    set({ isLoading: true, error: null });
     try {
-      console.log('[bookingStore] addBooking', {
-        packageId: data.packageId ?? null,
-        serviceCategoryId: data.serviceCategoryId,
-      });
-
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) {
-        console.error('[bookingStore] auth.getUser error', authError);
-      }
-
-      const customerId = authData.user?.id ?? '';
-      if (!customerId) {
-        throw new Error('Not authenticated');
-      }
-
-      const reference = makeReference();
-
-      const insertPayload: Partial<BookingRow> & {
-        reference: string;
-        customer_id: string;
-        service_category_id: string;
-        status: 'pending';
-        start_date: string;
-        end_date: string;
-        travelers: number;
-      } = {
-        reference,
-        customer_id: customerId,
-        service_category_id: data.serviceCategoryId,
-        status: 'pending',
-        start_date: data.startDate,
-        end_date: data.endDate,
-        travelers: data.travelers,
-        notes: data.notes ?? null,
-        type: data.type ?? null,
-        package_id: data.packageId ?? null,
-      };
-
-      const { data: inserted, error } = await supabase
-        .from('bookings')
-        .insert(insertPayload)
-        .select('*')
-        .single();
-
-      if (error) {
-        console.error('[bookingStore] insert error', error);
-        throw new Error(error.message);
-      }
-
-      const created = mapBookingRow(inserted as BookingRow);
-      set({ bookings: [created, ...get().bookings], isLoading: false });
-    } catch (e) {
-      console.error('[bookingStore] addBooking failed', e);
-      set({ isLoading: false });
-    }
-  },
-
-  updateBooking: async (id, updates) => {
-    try {
-      console.log('[bookingStore] updateBooking', { id, updates });
-
-      const patch: Partial<BookingRow> = {};
-      if (updates.status) patch.status = updates.status as BookingRow['status'];
-      if (updates.startDate) patch.start_date = updates.startDate;
-      if (updates.endDate) patch.end_date = updates.endDate;
-      if (updates.travelers != null) patch.travelers = updates.travelers;
-      if (updates.notes !== undefined) patch.notes = updates.notes ?? null;
-
-      if (Object.keys(patch).length === 0) return;
-
-      const { data: updated, error } = await supabase
-        .from('bookings')
-        .update(patch)
-        .eq('id', id)
-        .select('*')
-        .single();
-
-      if (error) {
-        console.error('[bookingStore] update error', error);
-        throw new Error(error.message);
-      }
-
-      const mapped = mapBookingRow(updated as BookingRow);
-      set({ bookings: get().bookings.map((b) => (b.id === id ? mapped : b)) });
-    } catch (e) {
-      console.error('[bookingStore] updateBooking failed', e);
-    }
-  },
-
-  fetchBookings: async (customerIdParam) => {
-    set({ isLoading: true });
-    try {
-      console.log('[bookingStore] fetchBookings', { customerIdParam: customerIdParam ?? null });
-
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) {
-        console.error('[bookingStore] auth.getUser error', authError);
-      }
-
-      const customerId = customerIdParam ?? authData.user?.id ?? '';
-      if (!customerId) {
-        set({ bookings: [], isLoading: false });
-        return;
-      }
+      const userId = await getAuthedUserId();
+      console.log('[bookingStore] fetchMyBookings', { userId });
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('*')
-        .eq('customer_id', customerId)
+        .select('id, user_id, status, notes, created_at, updated_at')
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('[bookingStore] select error', error);
+        console.error('[bookingStore] fetchMyBookings select error', error.message);
         throw new Error(error.message);
       }
 
-      const rows: BookingRow[] = (data ?? []) as BookingRow[];
-      set({ bookings: rows.map(mapBookingRow), isLoading: false });
+      set({ myBookings: (data ?? []) as BookingRow[], isLoading: false });
     } catch (e) {
-      console.error('[bookingStore] fetchBookings failed', e);
-      set({ isLoading: false });
+      const message = e instanceof Error ? e.message : 'Unknown error';
+      console.error('[bookingStore] fetchMyBookings failed', message);
+      set({ isLoading: false, error: { message } });
+    }
+  },
+
+  createBooking: async (payload) => {
+    set({ isLoading: true, error: null });
+    try {
+      const userId = await getAuthedUserId();
+      console.log('[bookingStore] createBooking', { userId, notesLen: payload.notes.length });
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .insert({
+          user_id: userId,
+          status: 'pending' as const,
+          notes: payload.notes,
+        })
+        .select('id, user_id, status, notes, created_at, updated_at')
+        .single();
+
+      if (error) {
+        console.error('[bookingStore] createBooking insert error', error.message);
+        throw new Error(error.message);
+      }
+
+      const created = data as BookingRow;
+      set({ myBookings: [created, ...get().myBookings], isLoading: false });
+      return created;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Unknown error';
+      console.error('[bookingStore] createBooking failed', message);
+      set({ isLoading: false, error: { message } });
+      return null;
+    }
+  },
+
+  adminFetchAllBookings: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      await assertAdmin();
+      console.log('[bookingStore] adminFetchAllBookings');
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('id, user_id, status, notes, created_at, updated_at')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('[bookingStore] adminFetchAllBookings select error', error.message);
+        throw new Error(error.message);
+      }
+
+      set({ adminBookings: (data ?? []) as BookingRow[], isLoading: false });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Unknown error';
+      console.error('[bookingStore] adminFetchAllBookings failed', message);
+      set({ isLoading: false, error: { message } });
+    }
+  },
+
+  updateBookingStatus: async (id, status) => {
+    set({ isLoading: true, error: null });
+    try {
+      await assertAdmin();
+      console.log('[bookingStore] updateBookingStatus', { id, status });
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .update({ status })
+        .eq('id', id)
+        .select('id, user_id, status, notes, created_at, updated_at')
+        .single();
+
+      if (error) {
+        console.error('[bookingStore] updateBookingStatus update error', error.message);
+        throw new Error(error.message);
+      }
+
+      const updated = data as BookingRow;
+      set({
+        isLoading: false,
+        adminBookings: get().adminBookings.map((b) => (b.id === id ? updated : b)),
+        myBookings: get().myBookings.map((b) => (b.id === id ? updated : b)),
+      });
+
+      return updated;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Unknown error';
+      console.error('[bookingStore] updateBookingStatus failed', message);
+      set({ isLoading: false, error: { message } });
+      return null;
     }
   },
 }));

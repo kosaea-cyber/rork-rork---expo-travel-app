@@ -1,24 +1,30 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, SafeAreaView } from 'react-native';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { useAuthStore } from '@/store/authStore';
-import { useBookingStore } from '@/store/bookingStore';
-import { Booking } from '@/lib/db/types';
+import { type BookingRow, useBookingStore } from '@/store/bookingStore';
 import HeaderLogo from '@/components/HeaderLogo';
 
 export default function BookingsScreen() {
   const t = useI18nStore((state) => state.t);
   const router = useRouter();
   const { user, isGuest } = useAuthStore();
-  const { bookings, isLoading, fetchBookings } = useBookingStore();
+  const myBookings = useBookingStore((s) => s.myBookings);
+  const isLoading = useBookingStore((s) => s.isLoading);
+  const error = useBookingStore((s) => s.error);
+  const fetchMyBookings = useBookingStore((s) => s.fetchMyBookings);
+
+  const sorted = useMemo(() => {
+    return [...myBookings].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  }, [myBookings]);
 
   useEffect(() => {
     if (user) {
-      fetchBookings();
+      fetchMyBookings();
     }
-  }, [user, fetchBookings]);
+  }, [user, fetchMyBookings]);
 
   if (!user && !isGuest) {
     // Should not happen due to route protection but safe guard
@@ -38,32 +44,33 @@ export default function BookingsScreen() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'confirmed': return Colors.success;
-      case 'cancelled': return Colors.error;
-      case 'completed': return Colors.textSecondary;
-      default: return '#FFA000'; // Pending orange
+      case 'confirmed':
+        return Colors.success;
+      case 'cancelled':
+        return Colors.error;
+      case 'completed':
+        return Colors.textSecondary;
+      default:
+        return '#FFA000';
     }
   };
 
-  const renderItem = ({ item }: { item: Booking }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => router.push(`/(tabs)/bookings/${item.id}`)}
-    >
+  const renderItem = ({ item }: { item: BookingRow }) => (
+    <TouchableOpacity style={styles.card} onPress={() => router.push(`/(tabs)/bookings/${item.id}`)}>
       <View style={styles.cardHeader}>
-        <Text style={styles.idText}>#{item.id}</Text>
+        <Text style={styles.idText}>#{item.id.slice(0, 8)}</Text>
         <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-          <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-            {t(item.status)}
-          </Text>
+          <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>{t(item.status)}</Text>
         </View>
       </View>
-      
-      <Text style={styles.packageTitle}>{item.packageTitle}</Text>
-      
+
+      <Text style={styles.packageTitle} numberOfLines={1}>
+        {item.notes?.trim() ? item.notes.split('\n')[0] : t('booking') ?? 'Booking'}
+      </Text>
+
       <View style={styles.row}>
-        <Text style={styles.dateLabel}>Start Date:</Text>
-        <Text style={styles.dateValue}>{item.startDate}</Text>
+        <Text style={styles.dateLabel}>{t('createdAt') ?? 'Created:'}</Text>
+        <Text style={styles.dateValue}>{new Date(item.created_at).toLocaleString()}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -81,13 +88,18 @@ export default function BookingsScreen() {
         </View>
       ) : (
         <FlatList
-          data={bookings}
+          data={sorted}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>{t('noBookings')}</Text>
+              <Text style={styles.emptyText}>{error?.message ?? t('noBookings')}</Text>
+              {error?.message ? (
+                <TouchableOpacity testID="bookings-retry" style={styles.retryButton} onPress={() => fetchMyBookings()}>
+                  <Text style={styles.retryButtonText}>{t('retry') ?? 'Retry'}</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           }
         />
@@ -193,5 +205,19 @@ const styles = StyleSheet.create({
   emptyText: {
     color: Colors.textSecondary,
     fontSize: 16,
+  },
+  retryButton: {
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  retryButtonText: {
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: '800',
   },
 });
