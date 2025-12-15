@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import { useI18nStore } from '@/constants/i18n';
+import { aiProvider } from '@/lib/ai/provider';
 import { supabase } from '@/lib/supabase/client';
 
 export type ConversationType = 'private' | 'public';
@@ -477,6 +478,53 @@ export const useChatStore = create<ChatState>((set, get) => {
               }
 
               if (settings.mode === 'auto_reply') {
+                let providerText: string | null = null;
+
+                try {
+                  providerText = await aiProvider.generateReply({
+                    conversationId,
+                    conversationType: convType,
+                    userMessage: trimmed,
+                    systemPrompt: settings.system_prompt ?? null,
+                  });
+                } catch (e) {
+                  console.warn('[chatStore] aiProvider.generateReply failed (non-fatal)', safeErrorDetails(e));
+                  providerText = null;
+                }
+
+                const reply = providerText?.trim() ? providerText.trim() : null;
+
+                if (reply) {
+                  const insertAiRes = await supabase
+                    .from('messages')
+                    .insert({
+                      conversation_id: conversationId,
+                      sender_type: 'ai',
+                      sender_id: null,
+                      body: reply,
+                    })
+                    .select('id, conversation_id, sender_type, sender_id, body, created_at')
+                    .single();
+
+                  if (insertAiRes.error) {
+                    console.warn('[chatStore] AI reply insert failed; falling back to stub', safeErrorDetails(insertAiRes.error));
+                  } else if (insertAiRes.data) {
+                    const aiMsg = mapMessageRow(insertAiRes.data as MessageRow);
+                    set((s) => {
+                      const existing = s.messagesByConversationId[conversationId] ?? [];
+                      return {
+                        messagesByConversationId: {
+                          ...s.messagesByConversationId,
+                          [conversationId]: mergeMessages(existing, [aiMsg]),
+                        },
+                      };
+                    });
+
+                    await bestEffortInsertAiLog({ status: 'skipped', request_json: { reason: 'provider_returned_text' } });
+                    return;
+                  }
+                }
+
                 const autoBody = useI18nStore.getState().t('chatAutoReplyStub');
 
                 const insertRes = await supabase
