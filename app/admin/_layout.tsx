@@ -32,6 +32,7 @@ export default function AdminLayout() {
         <Stack.Screen name="content" options={{ title: 'Manage Content' }} />
         <Stack.Screen name="hero" options={{ title: 'Hero Slider' }} />
         <Stack.Screen name="images" options={{ title: 'App Images' }} />
+        <Stack.Screen name="ai" options={{ title: 'AI Settings' }} />
       </Stack>
     </AdminGuard>
   );

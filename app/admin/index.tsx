@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LayoutDashboard, Package, Calendar, LogOut, FileText, Edit3, Users, MessageSquare, Image as ImageIcon } from 'lucide-react-native';
+import { LayoutDashboard, Package, Calendar, LogOut, FileText, Edit3, Users, MessageSquare, Image as ImageIcon, Sparkles } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useAuthStore } from '@/store/authStore';
 import { useI18nStore } from '@/constants/i18n';
@@ -108,6 +108,13 @@ export default function AdminDashboard() {
         color: '#2196F3',
         description: 'Chat with customers',
         badge: openConversations > 0 ? openConversations : undefined,
+      },
+      {
+        title: 'AI Settings',
+        icon: Sparkles,
+        route: '/admin/ai',
+        color: '#10B981',
+        description: 'Configure chat AI behavior',
       },
       {
         title: t('adminServices'),
