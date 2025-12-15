@@ -12,11 +12,43 @@ export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useI18nStore((state) => state.t);
 
-  const conversationId = String(id ?? '');
+  const routeConversationId = String(id ?? '');
 
-  const { conversations, messagesByConversationId, fetchMessages, sendMessage, subscribeToConversation } = useChatStore();
+  const { conversations, messagesByConversationId, fetchMessages, sendMessage, subscribeToConversation, getOrCreatePrivateConversation } =
+    useChatStore();
   const user = useAuthStore((state) => state.user);
   const isAdmin = useAuthStore((state) => state.isAdmin);
+
+  const [resolvedConversationId, setResolvedConversationId] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      if (isAdmin) {
+        setResolvedConversationId(routeConversationId);
+        return;
+      }
+
+      if (!user) {
+        setResolvedConversationId('');
+        return;
+      }
+
+      const conv = await getOrCreatePrivateConversation();
+      if (!cancelled) {
+        setResolvedConversationId(conv?.id ?? '');
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getOrCreatePrivateConversation, isAdmin, routeConversationId, user]);
+
+  const conversationId = isAdmin ? routeConversationId : resolvedConversationId;
 
   const conversation = useMemo(
     () => conversations.find((c) => c.id === conversationId) ?? null,
@@ -91,7 +123,7 @@ export default function ChatScreen() {
   if (!conversationId) {
     return (
       <View style={styles.container}>
-        <Text style={{ color: Colors.text }}>Conversation not found</Text>
+        <Text style={{ color: Colors.text }}>{user ? 'Conversation not found' : 'Please sign in to chat with support'}</Text>
       </View>
     );
   }

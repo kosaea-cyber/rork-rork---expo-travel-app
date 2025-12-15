@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/authStore';
 
 export default function ChatListScreen() {
   const router = useRouter();
-  const { conversations, getPublicConversation, getOrCreatePrivateConversation } = useChatStore();
+  const { conversations, getOrCreatePrivateConversation, getPublicConversation } = useChatStore();
   const { user, isAdmin } = useAuthStore();
 
   useEffect(() => {
@@ -18,11 +18,13 @@ export default function ChatListScreen() {
 
     if (user) {
       void getOrCreatePrivateConversation();
-    } else {
-      void getPublicConversation();
     }
   }, [getOrCreatePrivateConversation, getPublicConversation, isAdmin, user]);
 
+  const listData = useMemo(() => {
+    if (isAdmin) return conversations;
+    return conversations.filter((c) => c.type === 'private');
+  }, [conversations, isAdmin]);
 
   const renderItem = ({ item }: { item: Conversation }) => (
     <TouchableOpacity style={styles.item} onPress={() => router.push(`/chat/${item.id}` as any)}>
@@ -48,7 +50,7 @@ export default function ChatListScreen() {
   return (
     <View style={styles.container}>
       <FlatList
-        data={conversations}
+        data={listData}
         renderItem={renderItem}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
