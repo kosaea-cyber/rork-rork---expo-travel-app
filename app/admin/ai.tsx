@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -9,10 +10,9 @@ import {
   Switch,
   Text,
   TextInput,
-  ToastAndroid,
   View,
 } from 'react-native';
-import { Save, Sparkles } from 'lucide-react-native';
+import { Stack } from 'expo-router';
 
 import colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
@@ -34,90 +34,116 @@ type UiState =
   | { status: 'saving' }
   | { status: 'error'; message: string };
 
-function showToast(message: string) {
-  if (Platform.OS === 'android') {
-    ToastAndroid.show(message, ToastAndroid.SHORT);
-    return;
+const DEFAULT_SETTINGS: Omit<AiSettingsRow, 'id'> = {
+  is_enabled: false,
+  mode: 'off',
+  public_chat_enabled: true,
+  private_chat_enabled: true,
+  system_prompt: '',
+};
+
+const MODE_OPTIONS: { value: AiMode; label: string; description: string }[] = [
+  { value: 'off', label: 'Off', description: 'No automated behavior. Chat stays fully manual.' },
+  { value: 'auto_reply', label: 'Auto reply', description: 'Send a system reply automatically (if enabled).' },
+  { value: 'human_handoff', label: 'Human handoff', description: 'Queue for human follow-up (no auto replies).' },
+];
+
+async function fetchOrCreateAiSettings(): Promise<AiSettingsRow> {
+  console.log('[admin/ai] fetchOrCreateAiSettings');
+
+  const existingRes = await supabase
+    .from('ai_settings')
+    .select('id,is_enabled,mode,public_chat_enabled,private_chat_enabled,system_prompt')
+    .limit(1)
+    .maybeSingle();
+
+  console.log('[admin/ai] select ai_settings result', {
+    hasData: Boolean(existingRes.data),
+    error: existingRes.error?.message ?? null,
+  });
+
+  if (existingRes.error) {
+    throw new Error(existingRes.error.message);
   }
 
-  Alert.alert('Success', message);
-}
+  if (existingRes.data) {
+    const row = existingRes.data as AiSettingsRow;
+    return {
+      id: row.id,
+      is_enabled: Boolean(row.is_enabled),
+      mode: (row.mode ?? 'off') as AiMode,
+      public_chat_enabled: Boolean(row.public_chat_enabled),
+      private_chat_enabled: Boolean(row.private_chat_enabled),
+      system_prompt: row.system_prompt ?? '',
+    };
+  }
 
-function normalizeMode(value: unknown): AiMode {
-  if (value === 'off' || value === 'auto_reply' || value === 'human_handoff') return value;
-  return 'off';
+  console.log('[admin/ai] ai_settings empty - inserting default row');
+
+  const insertRes = await supabase
+    .from('ai_settings')
+    .insert({
+      is_enabled: DEFAULT_SETTINGS.is_enabled,
+      mode: DEFAULT_SETTINGS.mode,
+      public_chat_enabled: DEFAULT_SETTINGS.public_chat_enabled,
+      private_chat_enabled: DEFAULT_SETTINGS.private_chat_enabled,
+      system_prompt: DEFAULT_SETTINGS.system_prompt,
+    })
+    .select('id,is_enabled,mode,public_chat_enabled,private_chat_enabled,system_prompt')
+    .single();
+
+  console.log('[admin/ai] insert ai_settings result', {
+    hasData: Boolean(insertRes.data),
+    error: insertRes.error?.message ?? null,
+  });
+
+  if (insertRes.error || !insertRes.data) {
+    throw new Error(insertRes.error?.message ?? 'Failed to create default AI settings');
+  }
+
+  const created = insertRes.data as AiSettingsRow;
+  return {
+    id: created.id,
+    is_enabled: Boolean(created.is_enabled),
+    mode: (created.mode ?? 'off') as AiMode,
+    public_chat_enabled: Boolean(created.public_chat_enabled),
+    private_chat_enabled: Boolean(created.private_chat_enabled),
+    system_prompt: created.system_prompt ?? '',
+  };
 }
 
 export default function AdminAiSettingsPage() {
+  const mountedRef = useRef<boolean>(true);
+
   const [ui, setUi] = useState<UiState>({ status: 'loading' });
   const [rowId, setRowId] = useState<string | null>(null);
 
-  const [isEnabled, setIsEnabled] = useState<boolean>(false);
-  const [mode, setMode] = useState<AiMode>('off');
-  const [publicChatEnabled, setPublicChatEnabled] = useState<boolean>(true);
-  const [privateChatEnabled, setPrivateChatEnabled] = useState<boolean>(true);
-  const [systemPrompt, setSystemPrompt] = useState<string>('');
+  const [isEnabled, setIsEnabled] = useState<boolean>(DEFAULT_SETTINGS.is_enabled);
+  const [mode, setMode] = useState<AiMode>(DEFAULT_SETTINGS.mode);
+  const [publicChatEnabled, setPublicChatEnabled] = useState<boolean>(DEFAULT_SETTINGS.public_chat_enabled);
+  const [privateChatEnabled, setPrivateChatEnabled] = useState<boolean>(DEFAULT_SETTINGS.private_chat_enabled);
+  const [systemPrompt, setSystemPrompt] = useState<string>(DEFAULT_SETTINGS.system_prompt ?? '');
 
-  const mountedRef = useRef<boolean>(true);
+  const isBusy = ui.status === 'loading' || ui.status === 'saving';
 
   const load = useCallback(async () => {
     setUi({ status: 'loading' });
 
     try {
-      console.log('[admin/ai] load ai_settings');
-      const res = await supabase.from('ai_settings').select('*').limit(1).maybeSingle();
-
-      console.log('[admin/ai] select result', {
-        hasRow: Boolean(res.data),
-        error: res.error?.message ?? null,
-      });
-
-      if (res.error) throw new Error(res.error.message);
-
-      let settings = res.data as Partial<AiSettingsRow> | null;
-
-      if (!settings) {
-        console.log('[admin/ai] no ai_settings row found; inserting defaults');
-
-        const insertRes = await supabase
-          .from('ai_settings')
-          .insert({
-            is_enabled: false,
-            mode: 'off',
-            public_chat_enabled: true,
-            private_chat_enabled: true,
-            system_prompt: '',
-          })
-          .select('*')
-          .single();
-
-        console.log('[admin/ai] insert default result', {
-          hasRow: Boolean(insertRes.data),
-          error: insertRes.error?.message ?? null,
-        });
-
-        if (insertRes.error) throw new Error(insertRes.error.message);
-        settings = insertRes.data as Partial<AiSettingsRow>;
-      }
-
+      const s = await fetchOrCreateAiSettings();
       if (!mountedRef.current) return;
 
-      const id = typeof settings.id === 'string' ? settings.id : null;
-      setRowId(id);
-
-      setIsEnabled(Boolean(settings.is_enabled));
-      setMode(normalizeMode(settings.mode));
-      setPublicChatEnabled(settings.public_chat_enabled ?? true);
-      setPrivateChatEnabled(settings.private_chat_enabled ?? true);
-      setSystemPrompt((settings.system_prompt ?? '') as string);
-
+      setRowId(s.id);
+      setIsEnabled(s.is_enabled);
+      setMode(s.mode);
+      setPublicChatEnabled(s.public_chat_enabled);
+      setPrivateChatEnabled(s.private_chat_enabled);
+      setSystemPrompt(s.system_prompt ?? '');
       setUi({ status: 'ready' });
     } catch (e) {
       console.error('[admin/ai] load failed', e);
-      setUi({
-        status: 'error',
-        message: e instanceof Error ? e.message : 'Failed to load AI settings. Please try again.',
-      });
+      if (!mountedRef.current) return;
+      setUi({ status: 'error', message: 'Failed to load AI settings. Please try again.' });
     }
   }, []);
 
@@ -129,73 +155,87 @@ export default function AdminAiSettingsPage() {
     };
   }, [load]);
 
-  const canSave = useMemo(() => ui.status !== 'loading' && ui.status !== 'saving', [ui.status]);
-
-  const save = useCallback(async () => {
+  const onSave = useCallback(async () => {
     if (!rowId) {
-      Alert.alert('Error', 'AI settings row is missing an id. Please reload and try again.');
+      console.log('[admin/ai] cannot save: missing rowId');
+      setUi({ status: 'error', message: 'Missing AI settings row. Please retry.' });
       return;
     }
 
     setUi({ status: 'saving' });
 
     try {
-      const payload: Omit<AiSettingsRow, 'id'> = {
+      console.log('[admin/ai] saving ai_settings', {
+        rowId,
         is_enabled: isEnabled,
         mode,
         public_chat_enabled: publicChatEnabled,
         private_chat_enabled: privateChatEnabled,
-        system_prompt: systemPrompt,
-      };
-
-      console.log('[admin/ai] saving ai_settings', { rowId, payload });
+        system_prompt_len: systemPrompt.length,
+      });
 
       const res = await supabase
         .from('ai_settings')
-        .update(payload)
+        .update({
+          is_enabled: isEnabled,
+          mode,
+          public_chat_enabled: publicChatEnabled,
+          private_chat_enabled: privateChatEnabled,
+          system_prompt: systemPrompt,
+        })
         .eq('id', rowId)
-        .select('*')
+        .select('id')
         .single();
 
       console.log('[admin/ai] update result', {
+        ok: Boolean(res.data) && !res.error,
         error: res.error?.message ?? null,
-        hasRow: Boolean(res.data),
       });
 
-      if (res.error) throw new Error(res.error.message);
+      if (res.error) {
+        setUi({ status: 'error', message: res.error.message });
+        return;
+      }
 
-      showToast('AI settings saved');
       setUi({ status: 'ready' });
+      Alert.alert('Saved', 'AI settings updated successfully.');
     } catch (e) {
       console.error('[admin/ai] save failed', e);
-      setUi({ status: 'ready' });
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save AI settings');
+      setUi({ status: 'error', message: 'Failed to save. Please try again.' });
     }
   }, [isEnabled, mode, privateChatEnabled, publicChatEnabled, rowId, systemPrompt]);
 
-  const header = useMemo(() => {
-    return (
-      <View style={styles.hero}>
-        <View style={styles.heroIcon}>
-          <Sparkles size={20} color={colors.tint} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title} testID="adminAi.title">
-            AI Settings
-          </Text>
-          <Text style={styles.subtitle} testID="adminAi.subtitle">
-            Control when AI can respond, and how it behaves in chat.
-          </Text>
-        </View>
-      </View>
-    );
-  }, []);
+  const modeCards = useMemo(() => {
+    return MODE_OPTIONS.map((opt) => {
+      const selected = opt.value === mode;
+      return (
+        <Pressable
+          key={opt.value}
+          testID={`adminAi.mode.${opt.value}`}
+          disabled={isBusy}
+          onPress={() => setMode(opt.value)}
+          style={({ pressed }) => [
+            styles.modeCard,
+            selected && styles.modeCardSelected,
+            pressed && !isBusy ? { opacity: 0.9 } : null,
+          ]}
+        >
+          <View style={styles.modeCardTop}>
+            <View style={[styles.radio, selected && styles.radioSelected]} />
+            <Text style={[styles.modeTitle, selected && styles.modeTitleSelected]}>{opt.label}</Text>
+          </View>
+          <Text style={styles.modeDesc}>{opt.description}</Text>
+        </Pressable>
+      );
+    });
+  }, [isBusy, mode]);
 
   if (ui.status === 'loading') {
     return (
-      <View style={styles.loadingWrap} testID="adminAi.loading">
+      <View style={styles.stateWrap} testID="adminAi.loading">
+        <Stack.Screen options={{ title: 'AI Settings' }} />
         <ActivityIndicator color={colors.tint} />
-        <Text style={styles.loadingText}>Loading AI settings…</Text>
+        <Text style={styles.stateTitle}>Loading AI settings…</Text>
       </View>
     );
   }
@@ -203,149 +243,131 @@ export default function AdminAiSettingsPage() {
   if (ui.status === 'error') {
     return (
       <View style={styles.stateWrap} testID="adminAi.error">
+        <Stack.Screen options={{ title: 'AI Settings' }} />
         <Text style={styles.stateTitle}>Couldn’t load AI settings</Text>
         <Text style={styles.stateText}>{ui.message}</Text>
-        <Pressable testID="adminAi.retry" style={styles.primaryBtn} onPress={load}>
-          <Text style={styles.primaryBtnText}>Retry</Text>
+        <Pressable testID="adminAi.retry" style={styles.retryBtn} onPress={load}>
+          <Text style={styles.retryText}>Retry</Text>
         </Pressable>
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content} testID="adminAi.scroll">
-      {header}
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <Stack.Screen options={{ title: 'AI Settings' }} />
 
-      <View style={styles.card}>
-        <View style={styles.row}>
-          <View style={styles.rowText}>
-            <Text style={styles.rowTitle}>AI Enabled</Text>
-            <Text style={styles.rowHint}>Master switch for all AI chat behavior.</Text>
-          </View>
-          <Switch
-            testID="adminAi.isEnabled"
-            value={isEnabled}
-            onValueChange={setIsEnabled}
-            trackColor={{ false: '#233554', true: colors.tint }}
-            thumbColor={Platform.OS === 'android' ? colors.background : undefined}
-          />
-        </View>
-
-        <View style={styles.divider} />
-
-        <Text style={styles.sectionLabel}>Mode</Text>
-        <View style={styles.segmented} testID="adminAi.mode.segmented">
-          {(
-            [
-              { key: 'off' as const, label: 'Off' },
-              { key: 'auto_reply' as const, label: 'Auto reply' },
-              { key: 'human_handoff' as const, label: 'Human handoff' },
-            ] satisfies { key: AiMode; label: string }[]
-          ).map((opt) => {
-            const selected = mode === opt.key;
-            return (
-              <Pressable
-                key={opt.key}
-                testID={`adminAi.mode.${opt.key}`}
-                onPress={() => setMode(opt.key)}
-                style={({ pressed }) => [
-                  styles.segment,
-                  selected && styles.segmentSelected,
-                  pressed && { opacity: 0.88 },
-                ]}
-              >
-                <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{opt.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <View style={styles.modeNote}>
-          <Text style={styles.modeNoteText} testID="adminAi.mode.note">
-            {mode === 'off'
-              ? 'AI will never send messages.'
-              : mode === 'auto_reply'
-                ? 'AI may reply automatically when enabled.'
-                : 'AI will assist in routing, but expects a human admin to reply.'}
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.hero}>
+          <Text style={styles.heroTitle}>AI behavior for chat</Text>
+          <Text style={styles.heroSubtitle}>
+            Configure whether the assistant is enabled and how it behaves for public and private conversations.
           </Text>
         </View>
-      </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionLabel}>Chat availability</Text>
-
-        <View style={styles.row}>
-          <View style={styles.rowText}>
-            <Text style={styles.rowTitle}>Public chat</Text>
-            <Text style={styles.rowHint}>Controls AI behavior in the public chat widget.</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.label}>Enabled</Text>
+              <Text style={styles.help}>Master switch for all AI behavior</Text>
+            </View>
+            <Switch
+              testID="adminAi.isEnabled"
+              value={isEnabled}
+              onValueChange={setIsEnabled}
+              thumbColor={Platform.OS === 'android' ? colors.background : undefined}
+              trackColor={{ false: colors.border, true: colors.tint }}
+              disabled={isBusy}
+            />
           </View>
-          <Switch
-            testID="adminAi.publicChatEnabled"
-            value={publicChatEnabled}
-            onValueChange={setPublicChatEnabled}
-            trackColor={{ false: '#233554', true: colors.tint }}
-            thumbColor={Platform.OS === 'android' ? colors.background : undefined}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Mode</Text>
+          <Text style={styles.sectionSubtitle}>Choose the default behavior when AI is enabled</Text>
+        </View>
+
+        <View style={styles.modeGrid}>{modeCards}</View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Allowed chats</Text>
+          <Text style={styles.sectionSubtitle}>Limit AI behavior to specific chat types</Text>
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.label}>Public chat</Text>
+              <Text style={styles.help}>Home widget / guest messages</Text>
+            </View>
+            <Switch
+              testID="adminAi.publicChatEnabled"
+              value={publicChatEnabled}
+              onValueChange={setPublicChatEnabled}
+              thumbColor={Platform.OS === 'android' ? colors.background : undefined}
+              trackColor={{ false: colors.border, true: colors.tint }}
+              disabled={isBusy}
+            />
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.label}>Private chat</Text>
+              <Text style={styles.help}>Signed-in customer ↔ admin</Text>
+            </View>
+            <Switch
+              testID="adminAi.privateChatEnabled"
+              value={privateChatEnabled}
+              onValueChange={setPrivateChatEnabled}
+              thumbColor={Platform.OS === 'android' ? colors.background : undefined}
+              trackColor={{ false: colors.border, true: colors.tint }}
+              disabled={isBusy}
+            />
+          </View>
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>System prompt</Text>
+          <Text style={styles.sectionSubtitle}>A short guide for the assistant’s tone and behavior</Text>
+        </View>
+
+        <View style={styles.card}>
+          <TextInput
+            testID="adminAi.systemPrompt"
+            value={systemPrompt}
+            onChangeText={setSystemPrompt}
+            placeholder="e.g. Be concise, polite, and ask clarifying questions before booking."
+            placeholderTextColor={colors.textSecondary}
+            style={styles.textArea}
+            multiline
+            textAlignVertical="top"
+            editable={!isBusy}
           />
         </View>
 
-        <View style={styles.divider} />
+        <Pressable
+          testID="adminAi.save"
+          disabled={isBusy}
+          onPress={onSave}
+          style={({ pressed }) => [styles.saveBtn, pressed && !isBusy ? { opacity: 0.9 } : null]}
+        >
+          {ui.status === 'saving' ? <ActivityIndicator color={colors.background} /> : null}
+          <Text style={styles.saveText}>{ui.status === 'saving' ? 'Saving…' : 'Save changes'}</Text>
+        </Pressable>
 
-        <View style={styles.row}>
-          <View style={styles.rowText}>
-            <Text style={styles.rowTitle}>Private chat</Text>
-            <Text style={styles.rowHint}>Controls AI behavior in customer↔admin private chats.</Text>
-          </View>
-          <Switch
-            testID="adminAi.privateChatEnabled"
-            value={privateChatEnabled}
-            onValueChange={setPrivateChatEnabled}
-            trackColor={{ false: '#233554', true: colors.tint }}
-            thumbColor={Platform.OS === 'android' ? colors.background : undefined}
-          />
-        </View>
-      </View>
+        <Pressable testID="adminAi.reload" disabled={isBusy} onPress={load} style={styles.secondaryBtn}>
+          <Text style={styles.secondaryText}>Reload</Text>
+        </Pressable>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionLabel}>System prompt</Text>
-        <Text style={styles.helperText}>
-          This prompt guides how the AI should behave (tone, policies, product knowledge).
-        </Text>
-
-        <TextInput
-          testID="adminAi.systemPrompt"
-          style={styles.textArea}
-          value={systemPrompt}
-          onChangeText={setSystemPrompt}
-          placeholder="You are a helpful assistant for our airport services..."
-          placeholderTextColor={colors.textSecondary}
-          multiline
-          textAlignVertical="top"
-          autoCapitalize="sentences"
-        />
-      </View>
-
-      <Pressable
-        testID="adminAi.save"
-        onPress={save}
-        disabled={!canSave}
-        style={({ pressed }) => [
-          styles.saveBtn,
-          !canSave && { opacity: 0.6 },
-          pressed && canSave && { transform: [{ scale: 0.99 }] },
-        ]}
-      >
-        {ui.status === 'saving' ? (
-          <ActivityIndicator color={colors.background} />
-        ) : (
-          <View style={styles.saveBtnContent}>
-            <Save size={18} color={colors.background} />
-            <Text style={styles.saveBtnText}>Save changes</Text>
-          </View>
-        )}
-      </Pressable>
-
-      <View style={{ height: 30 }} />
-    </ScrollView>
+        <View style={{ height: 28 }} />
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -359,49 +381,49 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   hero: {
-    flexDirection: 'row',
-    gap: 12,
-    padding: 14,
+    padding: 16,
     borderRadius: 16,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  heroIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: '#D4AF3722',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
+  heroTitle: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '900',
   },
-  subtitle: {
-    marginTop: 2,
+  heroSubtitle: {
+    marginTop: 8,
     color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '700',
     lineHeight: 18,
   },
-  card: {
-    marginTop: 14,
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
+  sectionHeader: {
+    marginTop: 18,
+    marginBottom: 10,
+    paddingHorizontal: 2,
   },
-  sectionLabel: {
-    color: colors.textSecondary,
-    fontSize: 12,
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 14,
     fontWeight: '900',
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 10,
+    letterSpacing: 0.6,
+  },
+  sectionSubtitle: {
+    marginTop: 6,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
   },
   row: {
     flexDirection: 'row',
@@ -412,13 +434,13 @@ const styles = StyleSheet.create({
   rowText: {
     flex: 1,
   },
-  rowTitle: {
+  label: {
     color: colors.text,
     fontSize: 14,
     fontWeight: '900',
   },
-  rowHint: {
-    marginTop: 2,
+  help: {
+    marginTop: 6,
     color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
@@ -429,93 +451,91 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
     marginVertical: 12,
   },
-  segmented: {
-    flexDirection: 'row',
+  modeGrid: {
+    gap: 10,
+  },
+  modeCard: {
+    padding: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: '#0A192F',
+    backgroundColor: colors.card,
   },
-  segment: {
-    flex: 1,
-    paddingVertical: 10,
+  modeCardSelected: {
+    borderColor: colors.tint,
+    backgroundColor: '#D4AF3715',
+  },
+  modeCardTop: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 10,
   },
-  segmentSelected: {
+  radio: {
+    width: 16,
+    height: 16,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: colors.textSecondary,
+  },
+  radioSelected: {
+    borderColor: colors.tint,
     backgroundColor: colors.tint,
   },
-  segmentText: {
-    color: colors.textSecondary,
-    fontSize: 12,
+  modeTitle: {
+    color: colors.text,
+    fontSize: 15,
     fontWeight: '900',
   },
-  segmentTextSelected: {
-    color: colors.background,
+  modeTitleSelected: {
+    color: colors.tint,
   },
-  modeNote: {
-    marginTop: 10,
-    padding: 10,
+  modeDesc: {
+    marginTop: 8,
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  textArea: {
+    minHeight: 140,
+    maxHeight: 320,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    padding: 12,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#112240',
-  },
-  modeNoteText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
-  },
-  helperText: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
-    marginBottom: 10,
-  },
-  textArea: {
-    minHeight: 160,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    padding: 12,
-    color: colors.text,
-    backgroundColor: '#0A192F',
-    fontSize: 13,
-    fontWeight: '700',
+    backgroundColor: colors.background,
   },
   saveBtn: {
-    marginTop: 14,
+    marginTop: 16,
     height: 48,
     borderRadius: 14,
     backgroundColor: colors.tint,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  saveBtnContent: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 10,
   },
-  saveBtnText: {
+  saveText: {
     color: colors.background,
     fontSize: 14,
     fontWeight: '900',
   },
-  loadingWrap: {
-    flex: 1,
+  secondaryBtn: {
+    marginTop: 10,
+    height: 44,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.background,
-    gap: 10,
-    padding: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  loadingText: {
-    color: colors.textSecondary,
+  secondaryText: {
+    color: colors.text,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '900',
   },
   stateWrap: {
     flex: 1,
@@ -523,11 +543,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.background,
     padding: 24,
-    gap: 10,
+    gap: 12,
   },
   stateTitle: {
     color: colors.text,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
     textAlign: 'center',
   },
@@ -538,18 +558,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
   },
-  primaryBtn: {
-    marginTop: 6,
-    height: 42,
+  retryBtn: {
+    marginTop: 8,
     paddingHorizontal: 16,
+    height: 40,
     borderRadius: 999,
     backgroundColor: colors.tint,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primaryBtnText: {
+  retryText: {
     color: colors.background,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '900',
   },
 });
