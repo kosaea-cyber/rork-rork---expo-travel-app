@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView, StatusBar, SafeAreaView } from 'react-native';
 import Colors from '@/constants/colors';
+import HomeChatWidget from '@/components/chat/HomeChatWidget';
 import Hero from '@/components/home/Hero';
 import ServiceCategories from '@/components/home/ServiceCategories';
 import FeaturedPackages from '@/components/home/FeaturedPackages';
@@ -22,6 +23,8 @@ export default function HomeScreen() {
           <AirportSteps />
         </ScrollView>
       </SafeAreaView>
+
+      <HomeChatWidget />
     </View>
   );
 }
