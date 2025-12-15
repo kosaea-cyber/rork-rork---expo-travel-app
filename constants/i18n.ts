@@ -108,6 +108,10 @@ const translations: Record<Language, Record<string, string>> = {
     newCustomers: 'New Customers',
     activeBookings: 'Active Bookings',
     revenue: 'Revenue',
+
+    // Chat
+    chatAutoReplyStub:
+      "Thanks for reaching out — we’ve received your message. A team member will reply shortly.",
   },
   ar: {
     // General
@@ -196,6 +200,9 @@ const translations: Record<Language, Record<string, string>> = {
     newCustomers: 'عملاء جدد',
     activeBookings: 'حجوزات نشطة',
     revenue: 'الإيرادات',
+
+    // Chat
+    chatAutoReplyStub: 'شكرًا لتواصلك — تم استلام رسالتك. سيقوم أحد أعضاء الفريق بالرد قريبًا.',
   },
   de: {
     // General
@@ -284,6 +291,10 @@ const translations: Record<Language, Record<string, string>> = {
     newCustomers: 'Neue Kunden',
     activeBookings: 'Aktive Buchungen',
     revenue: 'Einnahmen',
+
+    // Chat
+    chatAutoReplyStub:
+      'Danke für Ihre Nachricht — wir haben sie erhalten. Ein Teammitglied antwortet in Kürze.',
   },
 };
 
