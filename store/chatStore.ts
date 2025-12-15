@@ -378,12 +378,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           senderId = null;
         } else if (mode === 'public_auth') {
           senderType = 'user';
-          senderId = userId;
-          if (!senderId) throw new Error('Not authenticated');
+          senderId = null;
         } else if (mode === 'private_user') {
           senderType = 'user';
-          senderId = userId;
-          if (!senderId) throw new Error('Not authenticated');
+          senderId = null;
         } else if (mode === 'admin') {
           senderType = 'admin';
           senderId = userId;
@@ -404,7 +402,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (error) {
           const details = safeErrorDetails(error);
           console.error('[chatStore] sendMessage insert error', details);
-          throw new Error((details.message as string | null) ?? 'Failed to send message');
+          throw new Error(error.message);
         }
 
         const msg = mapMessageRow(data as MessageRow);

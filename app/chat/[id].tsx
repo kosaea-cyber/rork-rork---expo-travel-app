@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { Send } from 'lucide-react-native';
 
@@ -23,6 +23,7 @@ export default function ChatScreen() {
     getOrCreatePrivateConversation,
     markConversationReadForAdmin,
     markConversationReadForUser,
+    error: chatError,
   } = useChatStore();
   const user = useAuthStore((state) => state.user);
   const isAdmin = useAuthStore((state) => state.isAdmin);
@@ -114,11 +115,22 @@ export default function ChatScreen() {
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    const sent = await sendMessage(conversationId, trimmed, mode);
-    if (sent) {
-      setText('');
+    try {
+      const sent = await sendMessage(conversationId, trimmed, mode);
+      if (sent) {
+        setText('');
+        return;
+      }
+
+      const msg = chatError ?? 'Failed to send message';
+      console.error('[chat] error', msg);
+      Alert.alert('Error', msg);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[chat] error', msg);
+      Alert.alert('Error', msg);
     }
-  }, [conversationId, mode, sendMessage, text]);
+  }, [chatError, conversationId, mode, sendMessage, text]);
 
   const renderMessage = useCallback(
     ({ item }: { item: Message }) => {

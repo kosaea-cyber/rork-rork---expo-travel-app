@@ -1,66 +1,162 @@
-import React, { useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+
 import Colors from '@/constants/colors';
-import { useChatStore, type Conversation } from '@/store/chatStore';
+import { supabase } from '@/lib/supabase/client';
 import { useAuthStore } from '@/store/authStore';
+import { useChatStore } from '@/store/chatStore';
+
+type UiState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'admin_list' };
 
 export default function ChatListScreen() {
   const router = useRouter();
-  const { conversations, getOrCreatePrivateConversation, getPublicConversation } = useChatStore();
-  const { user, isAdmin } = useAuthStore();
+  const isAdmin = useAuthStore((s) => s.isAdmin);
+
+  const { conversations, getPublicConversation } = useChatStore();
+
+  const [ui, setUi] = useState<UiState>({ status: 'loading' });
+
+  const openChat = useCallback(async () => {
+    setUi({ status: 'loading' });
+
+    try {
+      const { data: sessionRes, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        console.error('[chat] error', sessionError);
+      }
+
+      const session = sessionRes.session ?? null;
+      console.log('[chat] session?', !!session);
+
+      if (!session) {
+        const { data, error } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('type', 'public')
+          .order('created_at', { ascending: true })
+          .limit(1);
+
+        if (error) {
+          console.error('[chat] error', error);
+          setUi({ status: 'error', message: error.message });
+          return;
+        }
+
+        const conversationId = (data?.[0]?.id ?? '') as string;
+        if (!conversationId) {
+          setUi({ status: 'error', message: 'Public chat is not configured yet. Please contact support.' });
+          return;
+        }
+
+        console.log('[chat] conversationId', conversationId);
+        router.replace(`/chat/${conversationId}` as any);
+        return;
+      }
+
+      const userId = session.user.id;
+
+      const { data: existing, error: existingError } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('type', 'private')
+        .eq('customer_id', userId)
+        .limit(1);
+
+      if (existingError) {
+        console.error('[chat] error', existingError);
+        setUi({ status: 'error', message: existingError.message });
+        return;
+      }
+
+      const existingId = (existing?.[0]?.id ?? '') as string;
+
+      if (existingId) {
+        console.log('[chat] conversationId', existingId);
+        router.replace(`/chat/${existingId}` as any);
+        return;
+      }
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('conversations')
+        .insert({ type: 'private', customer_id: userId })
+        .select('id')
+        .single();
+
+      if (insertError) {
+        console.error('[chat] error', insertError);
+        setUi({ status: 'error', message: insertError.message });
+        return;
+      }
+
+      const conversationId = (inserted?.id ?? '') as string;
+      if (!conversationId) {
+        setUi({ status: 'error', message: 'Failed to create a conversation. Please try again.' });
+        return;
+      }
+
+      console.log('[chat] conversationId', conversationId);
+      router.replace(`/chat/${conversationId}` as any);
+    } catch (e) {
+      console.error('[chat] error', e);
+      setUi({ status: 'error', message: e instanceof Error ? e.message : 'Unexpected error' });
+    }
+  }, [router]);
 
   useEffect(() => {
     if (isAdmin) {
+      setUi({ status: 'admin_list' });
       void getPublicConversation();
       return;
     }
 
-    if (user) {
-      void getOrCreatePrivateConversation();
-    }
-  }, [getOrCreatePrivateConversation, getPublicConversation, isAdmin, user]);
+    void openChat();
+  }, [getPublicConversation, isAdmin, openChat]);
 
-  const listData = useMemo(() => {
-    if (isAdmin) return conversations;
-    return conversations.filter((c) => c.type === 'private');
-  }, [conversations, isAdmin]);
+  const adminListData = useMemo(() => conversations, [conversations]);
 
-  const renderItem = ({ item }: { item: Conversation }) => (
-    <TouchableOpacity style={styles.item} onPress={() => router.push(`/chat/${item.id}` as any)}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{item.type === 'public' ? 'P' : 'D'}</Text>
-      </View>
-      <View style={styles.content}>
-        <View style={styles.header}>
-          <Text style={styles.subject} numberOfLines={1}>
-            {item.type === 'public' ? 'Public chat' : 'Support'}
-          </Text>
-          <Text style={styles.time}>
-            {new Date(item.lastMessageAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
-        </View>
-        <Text style={styles.preview} numberOfLines={1}>
-          {item.type === 'public' ? 'Ask a question (guests allowed)' : 'Private conversation'}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
-
-  return (
-    <View style={styles.container}>
-      <FlatList
-        data={listData}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        ListEmptyComponent={
+  if (ui.status === 'admin_list') {
+    return (
+      <View style={styles.container}>
+        {adminListData.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyText}>No messages yet.</Text>
           </View>
-        }
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
-      />
+        ) : (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>Open messages from Admin → Messages.</Text>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  if (ui.status === 'error') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>{ui.message}</Text>
+          <Pressable
+            testID="chat.open.retry"
+            onPress={openChat}
+            style={({ pressed }) => [styles.retryButton, pressed && { opacity: 0.9 }]}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.emptyContainer}>
+        <ActivityIndicator color={Colors.tint} />
+        <Text style={styles.emptyText}>Opening chat…</Text>
+      </View>
     </View>
   );
 }
@@ -130,5 +226,20 @@ const styles = StyleSheet.create({
   emptyText: {
     color: Colors.textSecondary,
     fontSize: 16,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  retryButtonText: {
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
