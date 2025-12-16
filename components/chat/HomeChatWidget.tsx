@@ -91,8 +91,9 @@ export default function HomeChatWidget() {
 
       const conv = await getPublicConversation();
       if (!conv) {
-        const storeErr = useChatStore.getState().error;
-        console.error('[HomeChatWidget] no public conversation', { storeErr });
+        const storeErrUnknown: unknown = useChatStore.getState().error;
+        const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
+        console.error('[HomeChatWidget] no public conversation', storeErrUnknown);
 
         setLocalError(
           storeErr && storeErr.trim().length > 0
@@ -114,7 +115,8 @@ export default function HomeChatWidget() {
       });
     } catch (e) {
       console.error('[HomeChatWidget] bootstrap failed', e);
-      const storeErr = useChatStore.getState().error;
+      const storeErrUnknown: unknown = useChatStore.getState().error;
+      const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
       setLocalError(
         storeErr && storeErr.trim().length > 0
           ? storeErr
