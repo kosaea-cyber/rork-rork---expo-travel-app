@@ -3,11 +3,10 @@ const gold = '#D4AF37'; // Classic Gold
 const darkNavy = '#0A192F'; // Deep Navy
 const darkNavyLight = '#112240'; // Lighter Navy for cards
 const white = '#FFFFFF';
-const lightGray = '#E6E6E6';
 const error = '#FF4D4D';
 const success = '#4CAF50';
 
-export const Colors = {
+const Colors = {
   light: {
     primary: gold,
     background: white, // Used for contrast if needed, but main theme is dark
@@ -34,3 +33,4 @@ export const Colors = {
 };
 
 export default Colors.dark; // Defaulting to dark theme for the Royal look
+

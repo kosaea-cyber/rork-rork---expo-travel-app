@@ -65,9 +65,10 @@ export async function uploadImageToSupabaseStorage(params: {
   const ext = guessExtFromAsset(params.asset);
   const contentType = guessContentType(ext, params.asset.mimeType);
   const id = Crypto.randomUUID();
+  const ts = Date.now();
 
   const safeFolder = params.folder.replace(/^\/+|\/+$/g, '');
-  const path = `${safeFolder}/${id}.${ext}`;
+  const path = `${safeFolder}/${ts}-${id}.${ext}`;
 
   console.log('[storage] uploading image', {
     bucket,

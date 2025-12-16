@@ -94,7 +94,7 @@ export const Storage = {
       try {
         await webStorage.removeItem(key);
         return;
-      } catch (e) {
+      } catch {
         return AsyncStorage.removeItem(key);
       }
     }

@@ -4,14 +4,15 @@ import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { useAuthStore } from '@/store/authStore';
-import { useDataStore } from '@/store/dataStore';
+import { useAppImagesStore } from '@/store/appImagesStore';
 import HeaderLogo from '@/components/HeaderLogo';
 
 export default function WelcomeScreen() {
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
   const setGuest = useAuthStore((state) => state.setGuest);
-  const { appContent } = useDataStore();
+  const welcomeBackground = useAppImagesStore((s) => s.imagesByKey.welcomeBackground);
+
 
   const handleGuest = () => {
     setGuest();
@@ -22,7 +23,11 @@ export default function WelcomeScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ImageBackground
-        source={{ uri: appContent.images?.welcomeBackground || 'https://images.unsplash.com/photo-1548013146-72479768bada?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80' }} // Damascus or generic luxury travel
+        source={{
+          uri:
+            welcomeBackground ||
+            'https://images.unsplash.com/photo-1548013146-72479768bada?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
+        }}
         style={styles.background}
       >
         <View style={styles.overlay}>

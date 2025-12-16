@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { ServiceCategory, Package, BlogPost, AppSettings, FAQ } from '@/lib/db/types';
 
+
 interface DataState {
   services: ServiceCategory[];
   packages: Package[];

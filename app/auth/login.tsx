@@ -15,14 +15,14 @@ import {
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
-import { useDataStore } from '@/store/dataStore';
+import { useAppImagesStore } from '@/store/appImagesStore';
 import { supabase, supabaseConnectionCheck } from '@/lib/supabase/client';
 import { useProfileStore } from '@/store/profileStore';
 
 export default function LoginScreen() {
   const router = useRouter();
   const t = useI18nStore((state) => state.t);
-  const { appContent } = useDataStore();
+  const authBackground = useAppImagesStore((s) => s.imagesByKey.authBackground);
 
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -201,7 +201,11 @@ export default function LoginScreen() {
       style={styles.container}
     >
       <ImageBackground
-        source={{ uri: appContent.images?.authBackground || 'https://images.unsplash.com/photo-1548013146-72479768bada?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80' }}
+        source={{
+          uri:
+            authBackground ||
+            'https://images.unsplash.com/photo-1548013146-72479768bada?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80',
+        }}
         style={styles.background}
       >
         <View style={styles.overlay}>

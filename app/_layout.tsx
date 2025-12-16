@@ -7,6 +7,7 @@ import { useAuthStore } from "@/store/authStore";
 import { initI18n } from "@/constants/i18n";
 import { StatusBar } from "expo-status-bar";
 import { supabase } from "@/lib/supabase/client";
+import { useAppImagesStore } from "@/store/appImagesStore";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -20,6 +21,12 @@ export default function RootLayout() {
   useEffect(() => {
     initI18n();
     checkAuth();
+
+    try {
+      void useAppImagesStore.getState().refresh();
+    } catch (e) {
+      console.error('[RootLayout] appImagesStore refresh failed (non-blocking)', e);
+    }
 
     const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[RootLayout] supabase auth state change', {

@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
 import { useI18nStore, type Language } from '@/constants/i18n';
 import { supabase } from '@/lib/supabase/client';
+import { useAppImagesStore } from '@/store/appImagesStore';
 
 const { width } = Dimensions.get('window');
 const SLIDER_HEIGHT = 500;
@@ -99,6 +100,8 @@ export default function Hero() {
   const i18nLanguage = useI18nStore((state) => state.language);
 
   const lang: Lang = (i18nLanguage as Lang) ?? 'en';
+
+  const heroBackground = useAppImagesStore((s) => s.imagesByKey.heroBackground);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -196,7 +199,15 @@ export default function Hero() {
 
     return (
       <View style={styles.container}>
-        <ImageBackground source={require('@/assets/images/splash-icon.png')} style={styles.image} resizeMode="cover">
+        <ImageBackground
+          source={{
+            uri:
+              heroBackground ||
+              'https://images.unsplash.com/photo-1489515217757-5fd1be406fef?auto=format&fit=crop&w=1400&q=80',
+          }}
+          style={styles.image}
+          resizeMode="cover"
+        >
           <LinearGradient colors={['transparent', 'rgba(10, 25, 47, 0.92)']} style={styles.gradient}>
             <View style={[styles.content, isRTL && styles.contentRTL]}>
               <Text style={[styles.title, { textAlign: lang === 'ar' ? 'right' : 'left' }]} numberOfLines={3}>

@@ -6,6 +6,7 @@ import Colors from '@/constants/colors';
 import { AsyncImage } from '@/components/AsyncImage';
 import { supabase } from '@/lib/supabase/client';
 import { pickAndUploadImage } from '@/lib/supabase/storageUpload';
+import { useAppImagesStore } from '@/store/appImagesStore';
 
 function ImageInput({
   label,
@@ -134,6 +135,12 @@ export default function ManageImages() {
 
       if (res.error) throw new Error(res.error.message);
 
+      try {
+        await useAppImagesStore.getState().refresh();
+      } catch (e) {
+        console.error('[admin/images] refresh appImagesStore failed (non-blocking)', e);
+      }
+
       Alert.alert('Success', 'Images updated successfully');
       router.back();
     } catch (e) {
@@ -149,7 +156,7 @@ export default function ManageImages() {
       console.log('[admin/images] pickImage pressed', { key });
       setUploadingKey(key);
 
-      const uploaded = await pickAndUploadImage({ folder: 'app-images' });
+      const uploaded = await pickAndUploadImage({ folder: key });
       if (!uploaded) {
         setUploadingKey(null);
         return;

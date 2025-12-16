@@ -204,7 +204,7 @@ export default function CustomerDetail() {
     } finally {
       setSaving(false);
     }
-  }, [canSave, confirmRoleChangeIfNeeded, fullName, id, isBlocked, loadProfile, phone, preferredLanguage, profile, role]);
+  }, [canSave, confirmRoleChangeIfNeeded, fullName, id, isBlocked, loadProfile, phone, preferredLanguage, profile, role, showToast]);
 
   const onToggleBlocked = useCallback(() => {
     if (!profile) return;
