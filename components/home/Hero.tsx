@@ -16,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
 import { useProfileStore } from '@/store/profileStore';
-import { type Language } from '@/constants/i18n';
+import { useI18nStore, type Language } from '@/constants/i18n';
 import { supabase } from '@/lib/supabase/client';
 
 const { width } = Dimensions.get('window');
@@ -36,35 +36,34 @@ type HeroSlideRow = {
   created_at: string;
 };
 
-function getLocalizedDbField(row: HeroSlideRow, field: 'title' | 'subtitle', lang: Language): string {
-  const key = `${field}_${lang}` as const;
-  const fallbackEn = `${field}_en` as const;
-  const value = row[key as keyof HeroSlideRow];
-  if (typeof value === 'string' && value.length > 0) return value;
-  const en = row[fallbackEn as keyof HeroSlideRow];
-  if (typeof en === 'string' && en.length > 0) return en;
-  return '';
-}
+type Lang = 'en' | 'ar' | 'de';
+
+const pick = (
+  row: Record<string, unknown> | null | undefined,
+  base: string,
+  lang: Lang
+): string =>
+  (row?.[`${base}_${lang}`] as string | null | undefined) ??
+  (row?.[`${base}_en`] as string | null | undefined) ??
+  '';
 
 function HeroSlideItem({
   slide,
-  language,
-  isRTL,
+  lang,
   router,
 }: {
   slide: HeroSlideRow;
-  language: Language;
-  isRTL: boolean;
+  lang: Lang;
   router: ReturnType<typeof useRouter>;
 }) {
-  const title = useMemo(() => getLocalizedDbField(slide, 'title', language), [slide, language]);
-  const subtitle = useMemo(() => getLocalizedDbField(slide, 'subtitle', language), [slide, language]);
+  const title = useMemo(() => pick(slide as unknown as Record<string, unknown>, 'title', lang), [slide, lang]);
+  const subtitle = useMemo(() => pick(slide as unknown as Record<string, unknown>, 'subtitle', lang), [slide, lang]);
 
   const cta = useMemo(() => {
-    if (language === 'ar') return 'استكشف';
-    if (language === 'de') return 'Entdecken';
+    if (lang === 'ar') return 'استكشف';
+    if (lang === 'de') return 'Entdecken';
     return 'Explore';
-  }, [language]);
+  }, [lang]);
 
   return (
     <View style={styles.slide}>
@@ -73,15 +72,19 @@ function HeroSlideItem({
           colors={['transparent', 'rgba(0,0,0,0.2)', 'rgba(10, 25, 47, 0.95)']}
           style={styles.gradient}
         >
-          <View style={[styles.content, isRTL && styles.contentRTL]}>
-            <Text style={[styles.title, isRTL && styles.textRTL]} numberOfLines={3}>
+          <View style={[styles.content, lang === 'ar' && styles.contentRTL]}>
+            <Text style={[styles.title, { textAlign: lang === 'ar' ? 'right' : 'left' }]} numberOfLines={3}>
               {title}
             </Text>
-            <Text style={[styles.subtitle, isRTL && styles.textRTL]} numberOfLines={4}>
+            <Text style={[styles.subtitle, { textAlign: lang === 'ar' ? 'right' : 'left' }]} numberOfLines={4}>
               {subtitle}
             </Text>
 
-            <TouchableOpacity testID={`hero-slide-${slide.id}-cta`} style={[styles.button, isRTL && styles.buttonRTL]} onPress={() => router.push('/(tabs)/services')}>
+            <TouchableOpacity
+              testID={`hero-slide-${slide.id}-cta`}
+              style={[styles.button, lang === 'ar' && styles.buttonRTL]}
+              onPress={() => router.push('/(tabs)/services')}
+            >
               <Text style={styles.buttonText}>{cta}</Text>
             </TouchableOpacity>
           </View>
@@ -93,8 +96,11 @@ function HeroSlideItem({
 
 export default function Hero() {
   const router = useRouter();
+
   const preferredLanguage = useProfileStore((state) => state.preferredLanguage);
-  const language = (preferredLanguage ?? 'en') as Language;
+  const i18nLanguage = useI18nStore((state) => state.language);
+
+  const lang: Lang = ((preferredLanguage ?? i18nLanguage ?? 'en') as Lang) ?? 'en';
 
   const scrollViewRef = useRef<ScrollView>(null);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -140,7 +146,7 @@ export default function Hero() {
   }, [loadSlides]);
 
   const hasSlides = slides.length > 0;
-  const isRTL = language === 'ar';
+  const isRTL = lang === 'ar';
 
   useEffect(() => {
     if (!hasSlides) return;
@@ -188,17 +194,17 @@ export default function Hero() {
       },
     };
 
-    const copy = fallbackCopy[language] ?? fallbackCopy.en;
+    const copy = fallbackCopy[lang] ?? fallbackCopy.en;
 
     return (
       <View style={styles.container}>
         <ImageBackground source={require('@/assets/images/splash-icon.png')} style={styles.image} resizeMode="cover">
           <LinearGradient colors={['transparent', 'rgba(10, 25, 47, 0.92)']} style={styles.gradient}>
             <View style={[styles.content, isRTL && styles.contentRTL]}>
-              <Text style={[styles.title, isRTL && styles.textRTL]} numberOfLines={3}>
+              <Text style={[styles.title, { textAlign: lang === 'ar' ? 'right' : 'left' }]} numberOfLines={3}>
                 {copy.title}
               </Text>
-              <Text style={[styles.subtitle, isRTL && styles.textRTL]} numberOfLines={4}>
+              <Text style={[styles.subtitle, { textAlign: lang === 'ar' ? 'right' : 'left' }]} numberOfLines={4}>
                 {copy.subtitle}
               </Text>
 
@@ -239,7 +245,7 @@ export default function Hero() {
         style={{ flexDirection: I18nManager.isRTL ? 'row-reverse' : 'row' }}
       >
         {slides.map((slide) => (
-          <HeroSlideItem key={slide.id} slide={slide} language={language} isRTL={isRTL} router={router} />
+          <HeroSlideItem key={slide.id} slide={slide} lang={lang} router={router} />
         ))}
       </ScrollView>
 
