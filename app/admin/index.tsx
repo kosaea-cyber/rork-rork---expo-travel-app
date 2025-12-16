@@ -76,7 +76,7 @@ export default function AdminDashboard() {
 
   const handleLogout = async () => {
     await logout();
-    router.replace('/auth/login');
+    router.replace('/auth/welcome');
   };
 
   const totalCustomers = stats?.totalCustomers ?? 0;

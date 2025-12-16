@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase/client';
 import { User } from '@/lib/db/types';
+import { useProfileStore } from '@/store/profileStore';
 
 interface AuthState {
   user: User | null;
@@ -168,16 +169,26 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    console.log('[logout] start');
+
     try {
       const { error } = await supabase.auth.signOut();
       if (error) {
-        console.error('[authStore] signOut error', error);
+        console.error('[logout] error', error);
       }
     } catch (e) {
-      console.error('[authStore] signOut unexpected error', e);
+      console.error('[logout] error', e);
+    }
+
+    try {
+      useProfileStore.getState().clearProfile();
+    } catch (e) {
+      console.error('[logout] error', e);
     }
 
     set({ user: null, isAdmin: false, isGuest: false });
+
+    console.log('[logout] done');
   },
 
   setGuest: async () => {

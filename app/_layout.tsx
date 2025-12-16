@@ -28,6 +28,13 @@ export default function RootLayout() {
         userId: session?.user?.id ?? null,
       });
 
+      const guestMode = useAuthStore.getState().isGuest;
+
+      if (!session && !guestMode) {
+        console.log('[RootLayout] session is null -> redirect to /auth/welcome');
+        router.replace('/auth/welcome');
+      }
+
       try {
         await checkAuth();
       } catch (e) {
@@ -38,19 +45,19 @@ export default function RootLayout() {
     return () => {
       data.subscription.unsubscribe();
     };
-  }, [checkAuth]);
+  }, [checkAuth, router]);
 
   useEffect(() => {
     if (isLoading) return;
 
     const inAuthGroup = segments[0] === "auth";
-    const isAuthenticated = user || isGuest;
+    const isAuthenticated = Boolean(user) || Boolean(isGuest);
 
     console.log('RootLayout Check:', { 
       segments, 
       inAuthGroup, 
-      user: !!user, 
-      isGuest, 
+      user: !!user,
+      isGuest,
       isAuthenticated 
     });
 
