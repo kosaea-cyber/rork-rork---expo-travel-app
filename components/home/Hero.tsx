@@ -15,7 +15,6 @@ import {
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
-import { useProfileStore } from '@/store/profileStore';
 import { useI18nStore, type Language } from '@/constants/i18n';
 import { supabase } from '@/lib/supabase/client';
 
@@ -97,10 +96,9 @@ function HeroSlideItem({
 export default function Hero() {
   const router = useRouter();
 
-  const preferredLanguage = useProfileStore((state) => state.preferredLanguage);
   const i18nLanguage = useI18nStore((state) => state.language);
 
-  const lang: Lang = ((preferredLanguage ?? i18nLanguage ?? 'en') as Lang) ?? 'en';
+  const lang: Lang = (i18nLanguage as Lang) ?? 'en';
 
   const scrollViewRef = useRef<ScrollView>(null);
   const [currentIndex, setCurrentIndex] = useState<number>(0);

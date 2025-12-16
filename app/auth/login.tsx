@@ -151,6 +151,12 @@ export default function LoginScreen() {
         preferredLanguage: profileRes.data.preferred_language,
       });
 
+      try {
+        await useI18nStore.getState().hydrateFromProfile(profileRes.data.preferred_language);
+      } catch (e) {
+        console.error('[auth/login] hydrateFromProfile failed (non-blocking)', e);
+      }
+
       console.log('[login] role from profiles', profileRes.data.role);
 
       router.replace('/(tabs)/home');

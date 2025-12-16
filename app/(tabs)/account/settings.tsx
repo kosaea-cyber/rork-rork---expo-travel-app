@@ -1,16 +1,40 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import Colors from '@/constants/colors';
 import { useI18nStore, Language } from '@/constants/i18n';
 import { Check } from 'lucide-react-native';
+import { useAuthStore } from '@/store/authStore';
+import { supabase } from '@/lib/supabase/client';
 
 export default function SettingsScreen() {
   const { language, setLanguage, t } = useI18nStore();
+  const user = useAuthStore((s) => s.user);
 
-  const toggleLanguage = async (lang: Language) => {
-    await setLanguage(lang);
-    // Force a simpler reload if needed, but state should handle it.
-  };
+  const toggleLanguage = useCallback(
+    async (lang: Language) => {
+      console.log('[settings] language switch', { lang, hasUser: Boolean(user) });
+
+      await setLanguage(lang);
+
+      if (!user?.id) return;
+
+      try {
+        const res = await supabase
+          .from('profiles')
+          .update({ preferred_language: lang })
+          .eq('id', user.id);
+
+        if (res.error) {
+          console.error('[settings] update preferred_language error', res.error);
+          Alert.alert('Could not update language', res.error.message);
+        }
+      } catch (e) {
+        console.error('[settings] update preferred_language unexpected error', e);
+        Alert.alert('Could not update language', 'Unexpected error. Please try again.');
+      }
+    },
+    [setLanguage, user]
+  );
 
   return (
     <View style={styles.container}>

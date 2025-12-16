@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { supabase } from '@/lib/supabase/client';
 import { User } from '@/lib/db/types';
 import { useProfileStore } from '@/store/profileStore';
+import { useI18nStore } from '@/store/i18nStore';
 
 interface AuthState {
   user: User | null;
@@ -91,6 +92,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       const role = (profileRes.data?.role ?? 'customer') as 'admin' | 'customer';
       const preferredLanguage = (profileRes.data?.preferred_language ?? 'en') as 'en' | 'ar' | 'de';
+
+      try {
+        void useI18nStore.getState().hydrateFromProfile(preferredLanguage);
+      } catch (e) {
+        console.error('[authStore] hydrateFromProfile failed (non-blocking)', e);
+      }
 
       const mappedUser: User = {
         id: sessionUser.id,
