@@ -7,6 +7,8 @@ import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { useAuthStore } from '@/store/authStore';
 import { type Message, type SendMode, useChatStore } from '@/store/chatStore';
+import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
+import { useProfileStore } from '@/store/profileStore';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -65,6 +67,12 @@ export default function ChatScreen() {
   );
 
   const messages = messagesByConversationId[conversationId] ?? [];
+
+  const preferredLanguage = useProfileStore((s) => s.preferredLanguage);
+  const bannerText = useMemo(() => {
+    if (conversation?.type !== 'public') return null;
+    return resolveAutoReplyText({ categoryKey: 'general', preferredLanguage: preferredLanguage ?? 'en' });
+  }, [conversation?.type, preferredLanguage]);
 
   const [text, setText] = useState<string>('');
   const flatListRef = useRef<FlatList<Message>>(null);
@@ -164,6 +172,12 @@ export default function ChatScreen() {
         <Text style={styles.headerTitle}>{conversation?.type === 'public' ? 'Public chat' : 'Support chat'}</Text>
       </View>
 
+      {bannerText ? (
+        <View style={styles.systemBanner} testID="chat.publicBanner">
+          <Text style={styles.systemBannerText}>{bannerText}</Text>
+        </View>
+      ) : null}
+
       <FlatList
         ref={flatListRef}
         data={messages}
@@ -212,6 +226,22 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     textAlign: 'center',
+  },
+  systemBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(212,175,55,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.28)',
+  },
+  systemBannerText: {
+    color: Colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
   },
   listContent: {
     padding: 16,

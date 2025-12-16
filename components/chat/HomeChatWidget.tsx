@@ -15,6 +15,8 @@ import {
 import { MessageCircle, Send, X } from 'lucide-react-native';
 
 import Colors from '@/constants/colors';
+import { useI18nStore } from '@/constants/i18n';
+import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
 import type { Conversation, Message } from '@/store/chatStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -53,6 +55,12 @@ export default function HomeChatWidget() {
   } = useChatStore();
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
+
+  const language = useI18nStore((s) => s.language);
+  const publicBannerText = useMemo(() => {
+    if (!conversation || conversation.type !== 'public') return null;
+    return resolveAutoReplyText({ categoryKey: 'general', preferredLanguage: language });
+  }, [conversation, language]);
 
   const messages = useMemo<UiMessage[]>(() => {
     if (!conversation?.id) return [];
@@ -317,6 +325,11 @@ export default function HomeChatWidget() {
               ) : null}
 
               <View style={styles.messagesWrap}>
+                {publicBannerText ? (
+                  <View style={styles.systemBanner} testID="homeChatWidget.publicBanner">
+                    <Text style={styles.systemBannerText}>{publicBannerText}</Text>
+                  </View>
+                ) : null}
                 {showLoading && messages.length === 0 ? (
                   <View style={styles.loading} testID="homeChatWidgetLoading">
                     <ActivityIndicator color={Colors.primary} />
@@ -514,6 +527,23 @@ const styles = StyleSheet.create({
   messagesWrap: {
     flex: 1,
     minHeight: 240,
+  },
+  systemBanner: {
+    marginHorizontal: 14,
+    marginTop: 12,
+    marginBottom: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(212,175,55,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.28)',
+  },
+  systemBannerText: {
+    color: Colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18,
   },
   loading: {
     flex: 1,

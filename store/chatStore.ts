@@ -455,6 +455,11 @@ export const useChatStore = create<ChatState>((set, get) => {
                 return;
               }
 
+              if (convType === 'public') {
+                console.log('[chatStore] auto-reply disabled for public conversations (UI banner only)', { conversationId });
+                return;
+              }
+
               const settings = await getAiSettingsCached();
               console.log('[chatStore] auto-reply evaluate', {
                 conversationId,
@@ -468,7 +473,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               if (!settings.is_enabled) return;
               if (settings.mode === 'off') return;
 
-              const isAllowed = convType === 'public' ? settings.public_chat_enabled : settings.private_chat_enabled;
+              const isAllowed = settings.private_chat_enabled;
               if (!isAllowed) return;
 
               if (settings.mode === 'human_handoff') {
@@ -482,14 +487,10 @@ export const useChatStore = create<ChatState>((set, get) => {
                 try {
                   const knownConv = get().conversations.find((c) => c.id === conversationId) ?? null;
 
-                  if (convType === 'public') {
+                  if (knownConv?.type === 'private') {
                     categoryKey = 'general';
                   } else {
-                    if (knownConv?.type === 'private') {
-                      categoryKey = 'general';
-                    } else {
-                      categoryKey = 'general';
-                    }
+                    categoryKey = 'general';
                   }
                 } catch (e) {
                   console.warn('[chatStore] category detection failed; falling back to general', safeErrorDetails(e));

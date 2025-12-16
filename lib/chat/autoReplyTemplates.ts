@@ -19,7 +19,7 @@ export const AUTO_REPLY_TEMPLATES: Record<ChatCategoryKey, { en: string; ar: str
   },
   medical_aesthetic: {
     en: "Thank you ✨ \nFor Medical & Aesthetic travel, please share (optionally): the procedure/service you’re considering, preferred city, and your timeframe. Your information is handled with full privacy.",
-    ar: "شكرًا لك �� \nللسياحة العلاجية والتجميلية، يرجى ذكر (اختياريًا): نوع الإجراء/الخدمة، المدينة المفضلة، والفترة الزمنية. تتم معالجة معلوماتك بسرية تامة.",
+    ar: "شكرًا لك ✨ \nللسياحة العلاجية والتجميلية، يرجى ذكر (اختياريًا): نوع الإجراء/الخدمة، المدينة المفضلة، والفترة الزمنية. تتم معالجة معلوماتك بسرية تامة.",
     de: "Vielen Dank ✨ \nFür Medizin- & Ästhetikreisen teilen Sie uns bitte (optional) die gewünschte Behandlung, bevorzugte Stadt und den Zeitraum mit. Ihre Daten behandeln wir streng vertraulich.",
   },
   investment: {
