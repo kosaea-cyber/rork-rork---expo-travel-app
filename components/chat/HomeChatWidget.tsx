@@ -91,7 +91,15 @@ export default function HomeChatWidget() {
 
       const conv = await getPublicConversation();
       if (!conv) {
-        setLocalError('Chat is temporarily unavailable. Please try again.');
+        const storeErr = useChatStore.getState().error;
+        console.error('[HomeChatWidget] no public conversation', { storeErr });
+
+        setLocalError(
+          storeErr && storeErr.trim().length > 0
+            ? storeErr
+            : 'Public chat is not configured yet. Please contact support.'
+        );
+
         setIsBootstrapping(false);
         return;
       }
@@ -106,10 +114,15 @@ export default function HomeChatWidget() {
       });
     } catch (e) {
       console.error('[HomeChatWidget] bootstrap failed', e);
-      setLocalError('Chat is temporarily unavailable. Please try again.');
+      const storeErr = useChatStore.getState().error;
+      setLocalError(
+        storeErr && storeErr.trim().length > 0
+          ? storeErr
+          : 'Chat is temporarily unavailable. Please try again.'
+      );
       setIsBootstrapping(false);
     }
-  }, [fetchMessages, getPublicConversation]);
+  }, [fetchMessages, getPublicConversation, markConversationReadForUser]);
 
   useEffect(() => {
     if (!isOpen) return;
