@@ -1,60 +1,13 @@
 import { create } from 'zustand';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
-import { aiProvider } from '@/lib/ai/provider';
 import { supabase } from '@/lib/supabase/client';
-import { resolveAutoReplyText, type ChatCategoryKey } from '@/lib/chat/autoReplyTemplates';
-import { useProfileStore } from '@/store/profileStore';
 
 export type ConversationType = 'private' | 'public';
 export type MessageSenderType = 'user' | 'admin' | 'system' | 'ai';
 
 export type SendMode = 'public_guest' | 'public_auth' | 'private_user' | 'admin';
 
-type AiMode = 'off' | 'auto_reply' | 'human_handoff';
-
-type AiSettingsRow = {
-  id: string;
-  is_enabled: boolean;
-  mode: AiMode;
-  public_chat_enabled: boolean;
-  private_chat_enabled: boolean;
-  system_prompt: string | null;
-};
-
-let aiSettingsCache:
-  | {
-      expiresAtMs: number;
-      value: AiSettingsRow | null;
-    }
-  | null = null;
-
-async function getAiSettingsCached(): Promise<AiSettingsRow | null> {
-  const now = Date.now();
-  if (aiSettingsCache && aiSettingsCache.expiresAtMs > now) {
-    return aiSettingsCache.value;
-  }
-
-  try {
-    console.log('[chatStore] ai_settings cache miss; loading');
-
-    const res = await supabase.from('ai_settings').select('*').limit(1).maybeSingle();
-
-    if (res.error) {
-      console.warn('[chatStore] ai_settings select failed', safeErrorDetails(res.error));
-      aiSettingsCache = { expiresAtMs: now + 60_000, value: null };
-      return null;
-    }
-
-    const row = (res.data ?? null) as AiSettingsRow | null;
-    aiSettingsCache = { expiresAtMs: now + 60_000, value: row };
-    return row;
-  } catch (e) {
-    console.warn('[chatStore] ai_settings load unexpected error', safeErrorDetails(e));
-    aiSettingsCache = { expiresAtMs: now + 60_000, value: null };
-    return null;
-  }
-}
 
 type RealtimeHealth = 'idle' | 'connecting' | 'subscribed' | 'error' | 'closed';
 
@@ -164,17 +117,6 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   return Array.from(map.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-async function bestEffortInsertAiLog(payload: { status: 'skipped' | 'queued'; request_json: Record<string, unknown> }) {
-  try {
-    console.log('[chatStore] ai_logs insert', payload);
-    const { error } = await supabase.from('ai_logs').insert(payload);
-    if (error) {
-      console.warn('[chatStore] ai_logs insert failed', safeErrorDetails(error));
-    }
-  } catch (e) {
-    console.warn('[chatStore] ai_logs insert unexpected error', safeErrorDetails(e));
-  }
-}
 
 interface ChatState {
   conversations: Conversation[];
@@ -434,112 +376,6 @@ export const useChatStore = create<ChatState>((set, get) => {
           console.warn('[chatStore] conversations metadata update unexpected error', safeErrorDetails(e));
         }
 
-        if (senderType === 'user' && (mode === 'public_guest' || mode === 'public_auth' || mode === 'private_user')) {
-          void (async () => {
-            try {
-              const knownConv = get().conversations.find((c) => c.id === conversationId) ?? null;
-              let convType: ConversationType | null = knownConv?.type ?? null;
-
-              if (!convType) {
-                const res = await supabase.from('conversations').select('type').eq('id', conversationId).maybeSingle();
-                if (!res.error && res.data && (res.data as { type?: unknown }).type) {
-                  const t = (res.data as { type?: unknown }).type;
-                  if (t === 'public' || t === 'private') convType = t;
-                } else if (res.error) {
-                  console.warn('[chatStore] conversation type fetch failed', safeErrorDetails(res.error));
-                }
-              }
-
-              if (!convType) {
-                console.warn('[chatStore] auto-reply skipped: conversation type unknown', { conversationId });
-                return;
-              }
-
-              if (convType === 'public') {
-                console.log('[chatStore] auto-reply disabled for public conversations (UI banner only)', { conversationId });
-                return;
-              }
-
-              const settings = await getAiSettingsCached();
-              console.log('[chatStore] auto-reply evaluate', {
-                conversationId,
-                convType,
-                hasSettings: Boolean(settings),
-                isEnabled: settings?.is_enabled ?? null,
-                mode: settings?.mode ?? null,
-              });
-
-              if (!settings) return;
-              if (!settings.is_enabled) return;
-              if (settings.mode === 'off') return;
-
-              const isAllowed = settings.private_chat_enabled;
-              if (!isAllowed) return;
-
-              if (settings.mode === 'human_handoff') {
-                await bestEffortInsertAiLog({ status: 'queued', request_json: { reason: 'stub' } });
-                return;
-              }
-
-              if (settings.mode === 'auto_reply') {
-                let categoryKey: ChatCategoryKey = 'general';
-
-                try {
-                  const knownConv = get().conversations.find((c) => c.id === conversationId) ?? null;
-
-                  if (knownConv?.type === 'private') {
-                    categoryKey = 'general';
-                  } else {
-                    categoryKey = 'general';
-                  }
-                } catch (e) {
-                  console.warn('[chatStore] category detection failed; falling back to general', safeErrorDetails(e));
-                  categoryKey = 'general';
-                }
-
-                const preferredLanguage = useProfileStore.getState().preferredLanguage ?? 'en';
-                const autoBody = resolveAutoReplyText({ categoryKey, preferredLanguage });
-
-                try {
-                  const insertRes = await supabase
-                    .from('messages')
-                    .insert({
-                      conversation_id: conversationId,
-                      sender_type: 'system',
-                      sender_id: null,
-                      body: autoBody,
-                    })
-                    .select('id, conversation_id, sender_type, sender_id, body, created_at')
-                    .single();
-
-                  if (insertRes.error) {
-                    console.error('[chatStore] auto-reply template insert failed (non-fatal)', safeErrorDetails(insertRes.error));
-                  } else if (insertRes.data) {
-                    const systemMsg = mapMessageRow(insertRes.data as MessageRow);
-                    set((s) => {
-                      const existing = s.messagesByConversationId[conversationId] ?? [];
-                      return {
-                        messagesByConversationId: {
-                          ...s.messagesByConversationId,
-                          [conversationId]: mergeMessages(existing, [systemMsg]),
-                        },
-                      };
-                    });
-                  }
-                } catch (e) {
-                  console.error('[chatStore] auto-reply template insert unexpected error (non-fatal)', safeErrorDetails(e));
-                }
-
-                await bestEffortInsertAiLog({ status: 'skipped', request_json: { reason: 'stub_template' } });
-
-                void aiProvider;
-                void settings;
-              }
-            } catch (e) {
-              console.warn('[chatStore] auto-reply flow failed (non-fatal)', safeErrorDetails(e));
-            }
-          })();
-        }
 
         return msg;
       } catch (e) {

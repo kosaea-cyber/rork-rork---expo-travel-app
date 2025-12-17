@@ -8,11 +8,13 @@ import { useI18nStore } from '@/constants/i18n';
 import { useAuthStore } from '@/store/authStore';
 import { type Message, type SendMode, useChatStore } from '@/store/chatStore';
 import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
+import { maybeSendAiAutoReply } from '@/lib/chat/aiAutoReply';
 import { useProfileStore } from '@/store/profileStore';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useI18nStore((state) => state.t);
+  const language = useI18nStore((state) => state.language);
 
   const routeConversationId = String(id ?? '');
 
@@ -127,6 +129,17 @@ export default function ChatScreen() {
       const sent = await sendMessage(conversationId, trimmed, mode);
       if (sent) {
         setText('');
+
+        const convType = conversation?.type ?? (mode === 'private_user' ? 'private' : 'public');
+        if (convType === 'private' || convType === 'public') {
+          await maybeSendAiAutoReply({
+            conversationId,
+            conversationType: convType,
+            userText: trimmed,
+            language,
+          });
+        }
+
         return;
       }
 
@@ -138,7 +151,7 @@ export default function ChatScreen() {
       console.error('[chat] error', msg);
       Alert.alert('Error', msg);
     }
-  }, [chatError, conversationId, mode, sendMessage, text]);
+  }, [chatError, conversation?.type, conversationId, language, mode, sendMessage, text]);
 
   const renderMessage = useCallback(
     ({ item }: { item: Message }) => {

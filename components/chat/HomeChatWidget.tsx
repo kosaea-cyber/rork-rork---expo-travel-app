@@ -17,6 +17,7 @@ import { MessageCircle, Send, X } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
+import { maybeSendAiAutoReply } from '@/lib/chat/aiAutoReply';
 import type { Conversation, Message } from '@/store/chatStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -208,8 +209,16 @@ export default function HomeChatWidget() {
     if (!sent) {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
+      return;
     }
-  }, [conversation?.id, draft, sendMessage]);
+
+    await maybeSendAiAutoReply({
+      conversationId: convId,
+      conversationType: 'public',
+      userText: trimmed,
+      language,
+    });
+  }, [conversation?.id, draft, language, sendMessage]);
 
   const effectiveError = localError ?? error;
   const showLoading = isBootstrapping || isLoading;

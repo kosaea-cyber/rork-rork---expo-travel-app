@@ -3,6 +3,11 @@ const expoConfig = require('eslint-config-expo/flat');
 
 module.exports = defineConfig([
   {
+    linterOptions: {
+      reportUnusedDisableDirectives: "off",
+    },
+  },
+  {
     ignores: [
       "dist/*",
       ".expo/**",
@@ -21,12 +26,12 @@ module.exports = defineConfig([
     },
   },
   {
+    ignores: [".expo/types/router.d.ts", "**/.expo/types/router.d.ts"],
+  },
+  {
     files: [".expo/types/router.d.ts", "**/.expo/types/router.d.ts"],
     linterOptions: {
-      reportUnusedDisableDirectives: "off",
-    },
-    rules: {
-      "eslint-comments/no-unused-disable": "off",
+      reportUnusedDisableDirectives: false,
     },
   },
 ]);
