@@ -17,7 +17,7 @@ import { MessageCircle, Send, X } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
-import { maybeSendAiAutoReply } from '@/lib/chat/aiAutoReply';
+import { useAuthStore } from '@/store/authStore';
 import type { Conversation, Message } from '@/store/chatStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -38,9 +38,13 @@ export default function HomeChatWidget() {
   const [draft, setDraft] = useState<string>('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState<boolean>(false);
+  const [toast, setToast] = useState<string>('');
 
   const openAnim = useRef<Animated.Value>(new Animated.Value(0)).current;
+  const lastSendAtRef = useRef<number>(0);
   const listRef = useRef<FlatList<UiMessage> | null>(null);
+
+  const user = useAuthStore((s) => s.user);
 
   const {
     isLoading,
@@ -58,6 +62,11 @@ export default function HomeChatWidget() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
 
   const language = useI18nStore((s) => s.language);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 1600);
+  }, []);
   const publicBannerText = useMemo(() => {
     if (!conversation || conversation.type !== 'public') return null;
     return resolveAutoReplyText({ categoryKey: 'general', preferredLanguage: language });
@@ -202,23 +211,28 @@ export default function HomeChatWidget() {
     const trimmed = draft.trim();
     if (!trimmed) return;
 
+    if (!user) {
+      showToast('Please sign in to send messages.');
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastSendAtRef.current < 3000) {
+      showToast('Please wait a moment');
+      return;
+    }
+    lastSendAtRef.current = now;
+
     setDraft('');
     setLocalError(null);
 
-    const sent = await sendMessage(convId, trimmed, 'public_guest');
+    const sent = await sendMessage(convId, trimmed, 'public_auth');
     if (!sent) {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
       return;
     }
-
-    await maybeSendAiAutoReply({
-      conversationId: convId,
-      conversationType: 'public',
-      userText: trimmed,
-      language,
-    });
-  }, [conversation?.id, draft, language, sendMessage]);
+  }, [conversation?.id, draft, sendMessage, showToast, user]);
 
   const effectiveError = localError ?? error;
   const showLoading = isBootstrapping || isLoading;
@@ -293,7 +307,7 @@ export default function HomeChatWidget() {
                     Chat
                   </Text>
                   <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestLabel">
-                    You are chatting as Guest
+                    {user ? 'Signed in' : 'Guest (sign in required to send)'}
                   </Text>
 
                   {realtimeHealth === 'error' ? (
@@ -365,7 +379,8 @@ export default function HomeChatWidget() {
                   <TextInput
                     value={draft}
                     onChangeText={setDraft}
-                    placeholder="Write a message…"
+                    editable={Boolean(user)}
+                    placeholder={user ? 'Write a message…' : 'Sign in to message'}
                     placeholderTextColor={Colors.textSecondary}
                     style={styles.input}
                     multiline
@@ -375,7 +390,7 @@ export default function HomeChatWidget() {
 
                 <Pressable
                   onPress={onSend}
-                  disabled={!draft.trim() || !conversation?.id}
+                  disabled={!draft.trim() || !conversation?.id || !user}
                   style={({ pressed }) => [
                     styles.sendButton,
                     (!draft.trim() || !conversation?.id) && styles.sendButtonDisabled,
@@ -386,6 +401,12 @@ export default function HomeChatWidget() {
                   <Send color={Colors.text} size={18} />
                 </Pressable>
               </View>
+
+              {toast ? (
+                <View style={styles.toast} pointerEvents="none" testID="homeChatWidgetToast">
+                  <Text style={styles.toastText}>{toast}</Text>
+                </View>
+              ) : null}
             </Animated.View>
           </KeyboardAvoidingView>
         </View>
@@ -659,5 +680,21 @@ const styles = StyleSheet.create({
   },
   sendButtonPressed: {
     transform: [{ scale: 0.98 }],
+  },
+  toast: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 72,
+    backgroundColor: 'rgba(20,20,20,0.92)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '700',
   },
 });

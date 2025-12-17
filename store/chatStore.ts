@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 import { supabase } from '@/lib/supabase/client';
+import { normalizeSupabaseError } from '@/lib/utils/supabaseError';
 
 export type ConversationType = 'private' | 'public';
 export type MessageSenderType = 'user' | 'admin' | 'system' | 'ai';
@@ -125,6 +126,7 @@ interface ChatState {
   realtimeErrorByConversationId: Record<string, string | null>;
   isLoading: boolean;
   error: string | null;
+  lastSendAtMs: number;
 
   getPublicConversation: () => Promise<Conversation | null>;
   getOrCreatePrivateConversation: () => Promise<Conversation | null>;
@@ -150,6 +152,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     realtimeErrorByConversationId: {},
     isLoading: false,
     error: null,
+    lastSendAtMs: 0,
 
     getPublicConversation: async () => {
       set({ isLoading: true, error: null });
@@ -302,52 +305,65 @@ export const useChatStore = create<ChatState>((set, get) => {
         const trimmed = body.trim();
         if (!trimmed) return null;
 
-        console.log('[chatStore] sendMessage', { conversationId, mode, bodyLen: trimmed.length });
-
-        const { data: authData, error: authError } = await supabase.auth.getUser();
-        if (authError) {
-          const details = safeErrorDetails(authError);
-          console.error('[chatStore] auth.getUser error', details);
+        const now = Date.now();
+        const last = get().lastSendAtMs;
+        if (last && now - last < 3000) {
+          console.warn('[chatStore] sendMessage UI rate limit hit', { conversationId, mode, deltaMs: now - last });
+          set({ error: 'rate_limited' });
+          return null;
         }
 
-        const userId = authData.user?.id ?? null;
+        console.log('[chatStore] sendMessage (edge)', { conversationId, mode, bodyLen: trimmed.length });
 
-        let senderType: MessageSenderType = 'user';
-        let senderId: string | null = null;
-
-        if (mode === 'public_guest') {
-          senderType = 'user';
-          senderId = null;
-        } else if (mode === 'public_auth') {
-          senderType = 'user';
-          senderId = null;
-        } else if (mode === 'private_user') {
-          senderType = 'user';
-          senderId = null;
-        } else if (mode === 'admin') {
-          senderType = 'admin';
-          senderId = userId;
-          if (!senderId) throw new Error('Not authenticated');
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('[chatStore] auth.getSession error', safeErrorDetails(sessionError));
         }
 
-        const { data, error } = await supabase
-          .from('messages')
-          .insert({
-            conversation_id: conversationId,
-            sender_type: senderType,
-            sender_id: senderId,
-            body: trimmed,
-          })
-          .select('id, conversation_id, sender_type, sender_id, body, created_at')
-          .single();
-
-        if (error) {
-          const details = safeErrorDetails(error);
-          console.error('[chatStore] sendMessage insert error', details);
-          throw new Error(error.message);
+        const accessToken = sessionData.session?.access_token ?? null;
+        if (!accessToken) {
+          set({ error: 'not_authenticated' });
+          return null;
         }
 
-        const msg = mapMessageRow(data as MessageRow);
+        set({ lastSendAtMs: now, error: null });
+
+        const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+        if (!baseUrl) {
+          set({ error: 'Missing Supabase URL' });
+          return null;
+        }
+
+        const url = `${baseUrl.replace(/\/$/, '')}/functions/v1/chat-send-message`;
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ conversationId, body: trimmed, mode }),
+        });
+
+        const json = (await res.json().catch(() => null)) as
+          | { data?: MessageRow | null; error?: unknown }
+          | null;
+
+        if (!res.ok) {
+          const msg = normalizeSupabaseError(json?.error ?? { status: res.status, message: json ?? res.statusText });
+          console.error('[chatStore] sendMessage edge failed', { status: res.status, msg, raw: json });
+          set({ error: msg });
+          return null;
+        }
+
+        const row = (json?.data ?? null) as MessageRow | null;
+        if (!row) {
+          console.error('[chatStore] sendMessage edge missing data', { json });
+          set({ error: 'Failed to send message' });
+          return null;
+        }
+
+        const msg = mapMessageRow(row);
 
         set((s) => {
           const existing = s.messagesByConversationId[conversationId] ?? [];
@@ -359,29 +375,11 @@ export const useChatStore = create<ChatState>((set, get) => {
           };
         });
 
-        try {
-          const preview = trimmed.length > 80 ? trimmed.slice(0, 80) : trimmed;
-          const updatePayload: Partial<ConversationRow> = {
-            last_message_at: new Date().toISOString(),
-            last_message_preview: preview,
-            last_sender_type: senderType,
-          };
-
-          const { error: updateError } = await supabase.from('conversations').update(updatePayload).eq('id', conversationId);
-
-          if (updateError) {
-            console.warn('[chatStore] conversations metadata update blocked/failed (expected if trigger exists)', safeErrorDetails(updateError));
-          }
-        } catch (e) {
-          console.warn('[chatStore] conversations metadata update unexpected error', safeErrorDetails(e));
-        }
-
-
         return msg;
       } catch (e) {
         const details = safeErrorDetails(e);
         console.error('[chatStore] sendMessage failed', details);
-        set({ error: (details.message as string | null) ?? 'Failed to send message' });
+        set({ error: normalizeSupabaseError(e) });
         return null;
       }
     },

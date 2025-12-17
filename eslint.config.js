@@ -18,6 +18,7 @@ module.exports = defineConfig([
       '**/.expo/types/**',
       '.expo/types/router.d.ts',
       '**/.expo/types/router.d.ts',
+      'supabase/functions/**',
     ],
   },
   ...expoConfig,
@@ -32,22 +33,6 @@ module.exports = defineConfig([
     },
   },
   {
-    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts'],
-    linterOptions: {
-      reportUnusedDisableDirectives: 'off',
-    },
-    rules: {
-      'eslint-comments/no-unused-disable': 'off',
-      'eslint-comments/disable-enable-pair': 'off',
-
-      // Expo Router generated file sometimes contains a global `eslint-disable` banner.
-      // `expo lint` may run with `--report-unused-disable-directives`, so ensure at least
-      // one rule would have fired (making the directive “used”), while keeping it isolated.
-      'no-unused-vars': 'error',
-      '@typescript-eslint/no-unused-vars': 'error',
-    },
-  },
-  {
     // Hard-ignore Expo Router generated types (can contain eslint-disable banners).
     ignores: [
       '.expo/**',
@@ -58,16 +43,38 @@ module.exports = defineConfig([
       '**/.expo/types/**/*',
       '.expo/types/router.d.ts',
       '**/.expo/types/router.d.ts',
+      'supabase/functions/**',
     ],
   },
   {
-    // Final override: never report unused eslint-disable directives (avoids warnings from generated files).
+    files: ['supabase/functions/**', '**/supabase/functions/**'],
+    rules: {
+      'import/no-unresolved': 'off',
+    },
+  },
+  {
+    // Final override
     linterOptions: {
       reportUnusedDisableDirectives: 'off',
     },
     rules: {
       'eslint-comments/no-unused-disable': 'off',
       'eslint-comments/disable-enable-pair': 'off',
+      'import/no-unresolved': 'off',
+    },
+  },
+  {
+    // Force at least one suppressed rule in Expo Router's generated types file
+    // so its top-level eslint-disable banner isn't considered unused.
+    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Program',
+          message: 'generated-file',
+        },
+      ],
     },
   },
 ]);

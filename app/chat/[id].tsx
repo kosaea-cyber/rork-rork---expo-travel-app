@@ -8,13 +8,11 @@ import { useI18nStore } from '@/constants/i18n';
 import { useAuthStore } from '@/store/authStore';
 import { type Message, type SendMode, useChatStore } from '@/store/chatStore';
 import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
-import { maybeSendAiAutoReply } from '@/lib/chat/aiAutoReply';
 import { useProfileStore } from '@/store/profileStore';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const t = useI18nStore((state) => state.t);
-  const language = useI18nStore((state) => state.language);
 
   const routeConversationId = String(id ?? '');
 
@@ -77,6 +75,13 @@ export default function ChatScreen() {
   }, [conversation?.type, preferredLanguage]);
 
   const [text, setText] = useState<string>('');
+  const [toast, setToast] = useState<string>('');
+  const lastSendAtRef = useRef<number>(0);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 1600);
+  }, []);
   const flatListRef = useRef<FlatList<Message>>(null);
 
   const mode: SendMode = useMemo(() => {
@@ -125,21 +130,27 @@ export default function ChatScreen() {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    if (conversation?.type === 'public' && !user) {
+      showToast('Please sign in to send messages.');
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastSendAtRef.current < 3000) {
+      showToast('Please wait a moment');
+      return;
+    }
+    lastSendAtRef.current = now;
+
     try {
       const sent = await sendMessage(conversationId, trimmed, mode);
       if (sent) {
         setText('');
+        return;
+      }
 
-        const convType = conversation?.type ?? (mode === 'private_user' ? 'private' : 'public');
-        if (convType === 'private' || convType === 'public') {
-          await maybeSendAiAutoReply({
-            conversationId,
-            conversationType: convType,
-            userText: trimmed,
-            language,
-          });
-        }
-
+      if (chatError === 'rate_limited') {
+        showToast('Please wait a moment');
         return;
       }
 
@@ -151,7 +162,7 @@ export default function ChatScreen() {
       console.error('[chat] error', msg);
       Alert.alert('Error', msg);
     }
-  }, [chatError, conversation?.type, conversationId, language, mode, sendMessage, text]);
+  }, [chatError, conversation?.type, conversationId, mode, sendMessage, showToast, text, user]);
 
   const renderMessage = useCallback(
     ({ item }: { item: Message }) => {
@@ -202,23 +213,30 @@ export default function ChatScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
         <View style={styles.inputContainer}>
           <TextInput
-            style={styles.input}
+            style={[styles.input, conversation?.type === 'public' && !user ? styles.inputDisabled : null]}
             value={text}
             onChangeText={setText}
-            placeholder={t('sendMessage')}
+            placeholder={conversation?.type === 'public' && !user ? 'Sign in to message' : t('sendMessage')}
             placeholderTextColor={Colors.textSecondary}
+            editable={!(conversation?.type === 'public' && !user)}
             testID="chat.input"
           />
           <TouchableOpacity
-            style={[styles.sendButton, !text.trim() && styles.sendButtonDisabled]}
+            style={[styles.sendButton, (!text.trim() || (conversation?.type === 'public' && !user)) && styles.sendButtonDisabled]}
             onPress={handleSend}
-            disabled={!text.trim()}
+            disabled={!text.trim() || (conversation?.type === 'public' && !user)}
             testID="chat.send"
           >
             <Send color={Colors.background} size={20} />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {toast ? (
+        <View style={styles.toast} pointerEvents="none" testID="chat.toast">
+          <Text style={styles.toastText}>{toast}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -327,5 +345,23 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  inputDisabled: {
+    opacity: 0.7,
+  },
+  toast: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 110,
+    backgroundColor: 'rgba(20,20,20,0.92)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    textAlign: 'center',
   },
 });
