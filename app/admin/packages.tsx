@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Edit2, Plus, Save, Trash2, X } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
+import { deleteStorageObjectByPublicUrl } from '@/lib/supabase/storageUpload';
 
 type ServiceCategoryRow = {
   id: string;
@@ -181,9 +182,17 @@ export default function AdminPackages() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string): Promise<void> => {
-      const { error } = await supabase.from('packages').delete().eq('id', id);
+    mutationFn: async (params: { id: string; imageUrl?: string | null }): Promise<void> => {
+      const { error } = await supabase.from('packages').delete().eq('id', params.id);
       if (error) throw new Error(error.message);
+
+      if (params.imageUrl?.trim()) {
+        try {
+          await deleteStorageObjectByPublicUrl({ bucket: 'app-media', publicUrl: params.imageUrl });
+        } catch (e) {
+          console.error('[admin/packages] orphan cleanup failed (non-blocking)', e);
+        }
+      }
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'packages'] });
@@ -259,9 +268,9 @@ export default function AdminPackages() {
   }, [closeModal, createPackage, editing, updatePackage]);
 
   const onDelete = useCallback(
-    async (id: string) => {
+    async (row: { id: string; image_url?: string | null }) => {
       try {
-        await deletePackage(id);
+        await deletePackage({ id: row.id, imageUrl: row.image_url ?? null });
       } catch (e) {
         console.error('[admin/packages] delete failed', e);
       }
@@ -290,7 +299,7 @@ export default function AdminPackages() {
                 <Pressable testID={`admin-package-edit-${item.id}`} onPress={() => openEdit(item)} style={styles.actionBtn}>
                   <Edit2 size={20} color={Colors.tint} />
                 </Pressable>
-                <Pressable testID={`admin-package-delete-${item.id}`} onPress={() => onDelete(item.id)} style={styles.actionBtn}>
+                <Pressable testID={`admin-package-delete-${item.id}`} onPress={() => onDelete(item)} style={styles.actionBtn}>
                   <Trash2 size={20} color={Colors.error} />
                 </Pressable>
               </View>

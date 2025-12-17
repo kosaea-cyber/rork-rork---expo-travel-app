@@ -16,7 +16,7 @@ import LocalizedInput from '@/components/admin/LocalizedInput';
 import { AsyncImage } from '@/components/AsyncImage';
 import { supabase } from '@/lib/supabase/client';
 import AdminGuard from '@/components/admin/AdminGuard';
-import { pickAndUploadImage } from '@/lib/supabase/storageUpload';
+import { deleteStorageObjectByPublicUrl, pickAndUploadImage } from '@/lib/supabase/storageUpload';
 
 type HeroSlideRow = {
   id: string;
@@ -149,7 +149,7 @@ export default function ManageHero() {
     setEditingId(null);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (slide: HeroSlideRow) => {
     Alert.alert('Delete Slide', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -158,12 +158,21 @@ export default function ManageHero() {
         onPress: async () => {
           try {
             setSaving(true);
-            const res = await supabase.from('hero_slides').delete().eq('id', id);
-            console.log('[admin/hero] delete slide', { id, error: res.error?.message ?? null });
+            const res = await supabase.from('hero_slides').delete().eq('id', slide.id);
+            console.log('[admin/hero] delete slide', { id: slide.id, error: res.error?.message ?? null });
             if (res.error) {
               Alert.alert('Error', res.error.message);
               return;
             }
+
+            if (slide.image_url?.trim()) {
+              try {
+                await deleteStorageObjectByPublicUrl({ bucket: 'app-media', publicUrl: slide.image_url });
+              } catch (e) {
+                console.error('[admin/hero] orphan cleanup failed (non-blocking)', e);
+              }
+            }
+
             await fetchSlides();
           } catch (e) {
             console.error('[admin/hero] delete slide unexpected error', e);
@@ -362,7 +371,7 @@ export default function ManageHero() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   testID={`admin-hero-delete-${slide.id}`}
-                  onPress={() => handleDelete(slide.id)}
+                  onPress={() => handleDelete(slide)}
                   disabled={saving || rowSavingId === slide.id}
                 >
                   <Trash2 size={18} color={Colors.error} style={{ marginLeft: 10 }} />

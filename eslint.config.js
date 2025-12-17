@@ -3,14 +3,18 @@ const expoConfig = require('eslint-config-expo/flat');
 
 module.exports = defineConfig([
   {
-    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts'],
+    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts', 'expo/types/router.d.ts', '**/expo/types/router.d.ts'],
     linterOptions: {
       reportUnusedDisableDirectives: 'off',
     },
-    rules: {
-      'eslint-comments/no-unused-disable': 'off',
-      'eslint-comments/disable-enable-pair': 'off',
-    },
+  },
+  {
+    ignores: [
+      '.expo/**',
+      '**/.expo/**',
+      'expo/**',
+      '**/expo/**',
+    ],
   },
   {
     linterOptions: {
@@ -114,17 +118,6 @@ module.exports = defineConfig([
     ],
   },
   {
-    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts', 'expo/types/router.d.ts', '**/expo/types/router.d.ts'],
-    linterOptions: {
-      reportUnusedDisableDirectives: 'off',
-    },
-    rules: {
-      'eslint-comments/no-unused-disable': 'off',
-      'eslint-comments/disable-enable-pair': 'off',
-    },
-  },
-  {
-    // Absolute last: disable unused eslint-disable checks everywhere.
     linterOptions: {
       reportUnusedDisableDirectives: 'off',
     },

@@ -18,7 +18,7 @@ import * as LucideIcons from 'lucide-react-native';
 import { Check, ChevronDown, Edit2, ImagePlus, Plus, Save, Trash2, X } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
-import { pickAndUploadImage } from '@/lib/supabase/storageUpload';
+import { deleteStorageObjectByPublicUrl, pickAndUploadImage } from '@/lib/supabase/storageUpload';
 
 type ServiceCategoryRow = {
   id: string;
@@ -249,12 +249,20 @@ export default function AdminServices() {
   });
 
   const deleteCategoryMutation = useMutation({
-    mutationFn: async (id: string): Promise<void> => {
-      console.log('[admin/services] delete category', { id });
-      const { error } = await supabase.from('service_categories').delete().eq('id', id);
+    mutationFn: async (params: { id: string; imageUrl?: string | null }): Promise<void> => {
+      console.log('[admin/services] delete category', { id: params.id });
+      const { error } = await supabase.from('service_categories').delete().eq('id', params.id);
       if (error) {
         console.log('[admin/services] delete error', error);
         throw new Error(error.message);
+      }
+
+      if (params.imageUrl?.trim()) {
+        try {
+          await deleteStorageObjectByPublicUrl({ bucket: 'app-media', publicUrl: params.imageUrl });
+        } catch (e) {
+          console.error('[admin/services] orphan cleanup failed (non-blocking)', e);
+        }
       }
     },
     onSuccess: async () => {
@@ -380,7 +388,7 @@ export default function AdminServices() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteCategory(row.id);
+              await deleteCategory({ id: row.id, imageUrl: row.image_url });
             } catch (e) {
               console.error('[admin/services] delete failed', e);
               Alert.alert('Delete failed', e instanceof Error ? e.message : 'Unknown error');
