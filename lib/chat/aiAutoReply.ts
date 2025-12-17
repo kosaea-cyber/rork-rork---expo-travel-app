@@ -1,37 +1,20 @@
-import { supabase } from '@/lib/supabase/client';
+import { AUTO_REPLIES, type AutoReplyKey } from '@/lib/ai/autoReplies';
 import { getAiSettingsCached } from '@/lib/ai/settings';
+import { supabase } from '@/lib/supabase/client';
 import type { ConversationType, MessageSenderType } from '@/store/chatStore';
 import type { Language } from '@/store/i18nStore';
 
-type Intent = 'spa_relax' | 'study' | 'cosmetic_medical' | 'investment' | 'general';
-
-function detectIntent(text: string): Intent {
+function detectAutoReplyKey(text: string): AutoReplyKey {
   const t = text.toLowerCase();
 
   const has = (words: string[]) => words.some((w) => t.includes(w));
 
-  if (has(['spa', 'relax', 'massage', 'wellness', 'استجمام', 'سبا', 'مساج', 'relaxation'])) return 'spa_relax';
-  if (has(['study', 'university', 'school', 'student', 'education', 'دراسة', 'جامع', 'جامعة', 'تعليم'])) return 'study';
-  if (
-    has([
-      'cosmetic',
-      'aesthetic',
-      'medical',
-      'surgery',
-      'clinic',
-      'doctor',
-      'تجميل',
-      'علاج',
-      'طبي',
-      'عملية',
-      'عيادة',
-    ])
-  )
-    return 'cosmetic_medical';
-  if (has(['investment', 'invest', 'business', 'company', 'partner', 'استثمار', 'أعمال', 'شركة', 'شراكة']))
-    return 'investment';
+  if (has(['spa', 'relax', 'wellness', 'حمام', 'سبا', 'استجمام'])) return 'wellness_spa';
+  if (has(['study', 'university', 'admission', 'جامعة', 'دراسة'])) return 'study';
+  if (has(['medical', 'clinic', 'dentist', 'surgery', 'تجميل', 'علاج', 'أسنان', 'عيادة'])) return 'cosmetic_medical';
+  if (has(['invest', 'business', 'real estate', 'استثمار', 'مشروع', 'عقار'])) return 'investment';
 
-  return 'general';
+  return 'generic';
 }
 
 function pickLocalized(lang: Language, variants: { en: string; ar: string; de: string }): string {
@@ -40,44 +23,9 @@ function pickLocalized(lang: Language, variants: { en: string; ar: string; de: s
   return variants.en;
 }
 
-function buildReplyBody(intent: Intent, lang: Language): string {
-  if (intent === 'spa_relax') {
-    return pickLocalized(lang, {
-      en: 'We can help with Wellness & Relaxation (سياحة استجمام و spa). Do you prefer a luxury spa day or a multi-day wellness package?',
-      ar: 'نقدر نساعدك في سياحة الاستجمام و spa. هل تفضّل يوم سبا فاخر أم باقة استجمام لعدة أيام؟',
-      de: 'Wir helfen gerne bei Wellness & Entspannung (سياحة استجمام و spa). Möchten Sie eher einen Luxus-Spa-Tag oder ein mehrtägiges Wellness-Paket?',
-    });
-  }
-
-  if (intent === 'study') {
-    return pickLocalized(lang, {
-      en: 'Great — we offer Study Tourism (سياحة دراسية). Which level are you interested in (university / courses), and when do you plan to start?',
-      ar: 'ممتاز — لدينا سياحة دراسية. ما المستوى الذي تبحث عنه (جامعة/دورات) ومتى ترغب بالبدء؟',
-      de: 'Super — wir bieten Studientourismus (سياحة دراسية). Für welches Niveau interessieren Sie sich (Uni/Kurse) und wann möchten Sie starten?',
-    });
-  }
-
-  if (intent === 'cosmetic_medical') {
-    return pickLocalized(lang, {
-      en: 'We can assist with Medical & Aesthetic Tourism (سياحة تجميلية وعلاجية). What service are you looking for, and do you have preferred dates?',
-      ar: 'نقدر نساعدك في السياحة التجميلية والعلاجية. ما الخدمة المطلوبة وهل لديك تواريخ مفضلة؟',
-      de: 'Wir unterstützen bei medizinischem & ästhetischem Tourismus (سياحة تجميلية وعلاجية). Welche Leistung möchten Sie, und haben Sie Wunschtermine?',
-    });
-  }
-
-  if (intent === 'investment') {
-    return pickLocalized(lang, {
-      en: 'We can guide you for Investment Tourism (سياحة استثمارية). What sector are you interested in, and what is your approximate budget range?',
-      ar: 'نقدر نرشدك في سياحة استثمارية. ما القطاع الذي تهتم به وما هو نطاق الميزانية التقريبي؟',
-      de: 'Wir begleiten Sie beim Investment-Tourismus (سياحة استثمارية). Für welchen Sektor interessieren Sie sich und in welcher Budget-Spanne?',
-    });
-  }
-
-  return pickLocalized(lang, {
-    en: "Welcome to Ruwasi Elite Travel. What type of trip do you want (wellness / medical / study / investment)? And what dates are you considering?",
-    ar: 'أهلاً بك في رواسي إليت للسفر. أي نوع رحلة تريد (استجمام/علاج/دراسة/استثمار)؟ وما هي التواريخ المناسبة لك؟',
-    de: 'Willkommen bei Ruwasi Elite Travel. Welche Art von Reise wünschen Sie (Wellness/Medizin/Studium/Investment) und welche Daten kommen in Frage?',
-  });
+function buildReplyBody(replyKey: AutoReplyKey, lang: Language): string {
+  const variants = AUTO_REPLIES[replyKey] ?? AUTO_REPLIES.generic;
+  return pickLocalized(lang, variants);
 }
 
 export async function maybeSendAiAutoReply(params: {
@@ -110,8 +58,8 @@ export async function maybeSendAiAutoReply(params: {
     if (conversationType === 'public' && settings.allow_public !== true) return;
     if (conversationType === 'private' && settings.allow_private !== true) return;
 
-    const intent = detectIntent(userText);
-    const body = buildReplyBody(intent, language);
+    const replyKey = detectAutoReplyKey(userText);
+    const body = buildReplyBody(replyKey, language);
 
     const senderType: MessageSenderType = 'system';
     const nowIso = new Date().toISOString();
