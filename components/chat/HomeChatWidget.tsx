@@ -50,6 +50,7 @@ export default function HomeChatWidget() {
     isLoading,
     error,
     messagesByConversationId,
+    hasMoreByConversationId,
     realtimeHealthByConversationId,
     realtimeErrorByConversationId,
     getPublicConversation,
@@ -76,6 +77,12 @@ export default function HomeChatWidget() {
     if (!conversation?.id) return [];
     return messagesByConversationId[conversation.id] ?? [];
   }, [conversation?.id, messagesByConversationId]);
+
+  const hasMore = useMemo(() => {
+    const id = conversation?.id;
+    if (!id) return false;
+    return hasMoreByConversationId[id] ?? false;
+  }, [conversation?.id, hasMoreByConversationId]);
 
   const realtimeHealth = useMemo(() => {
     const id = conversation?.id;
@@ -200,6 +207,23 @@ export default function HomeChatWidget() {
     console.log('[HomeChatWidget] manual refresh', { convId });
     void fetchMessages(convId, 30);
   }, [conversation?.id, fetchMessages]);
+
+  const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
+
+  const onLoadOlder = useCallback(async () => {
+    const convId = conversation?.id;
+    if (!convId) return;
+    const oldest = messages[0]?.createdAt ?? null;
+    if (!oldest) return;
+
+    try {
+      setIsLoadingOlder(true);
+      console.log('[HomeChatWidget] load older', { convId, before: oldest });
+      await fetchMessages(convId, 30, oldest);
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }, [conversation?.id, fetchMessages, messages]);
 
   const onSend = useCallback(async () => {
     const convId = conversation?.id;
@@ -370,6 +394,22 @@ export default function HomeChatWidget() {
                     testID="homeChatWidgetMessagesList"
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
+                    ListHeaderComponent={
+                      messages.length > 0 && hasMore ? (
+                        <Pressable
+                          onPress={onLoadOlder}
+                          disabled={isLoadingOlder}
+                          style={({ pressed }) => [
+                            styles.loadOlder,
+                            (pressed && !isLoadingOlder) ? { opacity: 0.92 } : null,
+                            isLoadingOlder ? { opacity: 0.6 } : null,
+                          ]}
+                          testID="homeChatWidgetLoadOlder"
+                        >
+                          <Text style={styles.loadOlderText}>{isLoadingOlder ? 'Loading…' : 'Load older'}</Text>
+                        </Pressable>
+                      ) : null
+                    }
                   />
                 )}
               </View>
@@ -591,6 +631,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     gap: 10,
+  },
+  loadOlder: {
+    alignSelf: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  loadOlderText: {
+    color: Colors.text,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   messageRow: {
     flexDirection: 'row',

@@ -16,12 +16,20 @@ module.exports = defineConfig([
       '**/.expo/**',
       '.expo/types/**',
       '**/.expo/types/**',
-      '.expo/types/router.d.ts',
-      '**/.expo/types/router.d.ts',
+      'expo/**',
+      '**/expo/**',
+      'expo/types/**',
+      '**/expo/types/**',
       'supabase/functions/**',
     ],
   },
-  ...expoConfig,
+  ...expoConfig.map((c) => ({
+    ...c,
+    linterOptions: {
+      ...(c.linterOptions ?? {}),
+      reportUnusedDisableDirectives: 'off',
+    },
+  })),
   {
     // Ensure this stays OFF even if eslint-config-expo enables it.
     linterOptions: {
@@ -41,8 +49,10 @@ module.exports = defineConfig([
       '.expo/types/**',
       '**/.expo/types/**',
       '**/.expo/types/**/*',
-      '.expo/types/router.d.ts',
-      '**/.expo/types/router.d.ts',
+      'expo/**',
+      '**/expo/**',
+      'expo/types/**',
+      '**/expo/types/**',
       'supabase/functions/**',
     ],
   },
@@ -64,17 +74,28 @@ module.exports = defineConfig([
     },
   },
   {
-    // Force at least one suppressed rule in Expo Router's generated types file
-    // so its top-level eslint-disable banner isn't considered unused.
-    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts'],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: 'Program',
-          message: 'generated-file',
-        },
-      ],
+    linterOptions: {
+      reportUnusedDisableDirectives: 'off',
     },
   },
+  {
+    // Final hard-ignore (must be last so nothing re-includes these files).
+    ignores: [
+      '.expo/**',
+      '**/.expo/**',
+      '.expo/types/**',
+      '**/.expo/types/**',
+      'expo/**',
+      '**/expo/**',
+      'expo/types/**',
+      '**/expo/types/**',
+    ],
+  },
+  {
+    // Absolute last: disable unused eslint-disable checks everywhere.
+    linterOptions: {
+      reportUnusedDisableDirectives: 'off',
+    },
+  },
+
 ]);

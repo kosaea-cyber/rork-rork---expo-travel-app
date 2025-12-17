@@ -4,3 +4,9 @@
 **/.expo/types/
 .expo/types/router.d.ts
 **/.expo/types/router.d.ts
+expo/
+**/expo/
+expo/types/
+**/expo/types/
+expo/types/router.d.ts
+**/expo/types/router.d.ts

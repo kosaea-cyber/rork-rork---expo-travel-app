@@ -10,7 +10,7 @@ export type MessageSenderType = 'user' | 'admin' | 'system' | 'ai';
 export type SendMode = 'public_guest' | 'public_auth' | 'private_user' | 'admin';
 
 
-type RealtimeHealth = 'idle' | 'connecting' | 'subscribed' | 'error' | 'closed';
+type RealtimeHealth = 'idle' | 'connecting' | 'subscribed' | 'polling' | 'error' | 'closed';
 
 export interface Conversation {
   id: string;
@@ -122,6 +122,7 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
 interface ChatState {
   conversations: Conversation[];
   messagesByConversationId: Record<string, Message[]>;
+  hasMoreByConversationId: Record<string, boolean>;
   realtimeHealthByConversationId: Record<string, RealtimeHealth>;
   realtimeErrorByConversationId: Record<string, string | null>;
   isLoading: boolean;
@@ -148,6 +149,7 @@ export const useChatStore = create<ChatState>((set, get) => {
   return {
     conversations: [],
     messagesByConversationId: {},
+    hasMoreByConversationId: {},
     realtimeHealthByConversationId: {},
     realtimeErrorByConversationId: {},
     isLoading: false,
@@ -253,10 +255,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     fetchMessages: async (conversationId, limit, before) => {
-      set({ isLoading: true, error: null });
+      const fetchInternal = async (opts: { setLoading: boolean }): Promise<Message[]> => {
+        if (opts.setLoading) set({ isLoading: true, error: null });
 
-      try {
-        console.log('[chatStore] fetchMessages', { conversationId, limit, before: before ?? null });
+        try {
+          console.log('[chatStore] fetchMessages', { conversationId, limit, before: before ?? null, setLoading: opts.setLoading });
 
         let q = supabase
           .from('messages')
@@ -282,12 +285,17 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         set((s) => {
           const existing = s.messagesByConversationId[conversationId] ?? [];
+          const hasMore = rows.length >= limit;
           return {
             messagesByConversationId: {
               ...s.messagesByConversationId,
               [conversationId]: mergeMessages(existing, incoming),
             },
-            isLoading: false,
+            hasMoreByConversationId: {
+              ...s.hasMoreByConversationId,
+              [conversationId]: hasMore,
+            },
+            isLoading: opts.setLoading ? false : s.isLoading,
           };
         });
 
@@ -295,9 +303,12 @@ export const useChatStore = create<ChatState>((set, get) => {
       } catch (e) {
         const details = safeErrorDetails(e);
         console.error('[chatStore] fetchMessages failed', details);
-        set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load messages' });
+        if (opts.setLoading) set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load messages' });
         return [];
       }
+      };
+
+      return await fetchInternal({ setLoading: true });
     },
 
     sendMessage: async (conversationId, body, mode) => {
@@ -411,6 +422,73 @@ export const useChatStore = create<ChatState>((set, get) => {
       }));
 
       let channel: RealtimeChannel | null = null;
+      let pollTimer: ReturnType<typeof setInterval> | null = null;
+      let stopped = false;
+
+      const startPolling = () => {
+        if (pollTimer) return;
+
+        console.log('[chatStore] realtime disabled -> polling', { conversationId });
+        set((s) => ({
+          realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'polling' },
+          realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
+        }));
+
+        const tick = async () => {
+          try {
+            if (stopped) return;
+            const existing = get().messagesByConversationId[conversationId] ?? [];
+            const latest = existing[existing.length - 1]?.createdAt ?? null;
+
+            console.log('[chatStore] poll tick', { conversationId, latest });
+
+            const { data, error } = await supabase
+              .from('messages')
+              .select('id, conversation_id, sender_type, sender_id, body, created_at')
+              .eq('conversation_id', conversationId)
+              .order('created_at', { ascending: false })
+              .limit(30);
+
+            if (error) {
+              console.warn('[chatStore] poll fetch error', safeErrorDetails(error));
+              return;
+            }
+
+            const rows = (data ?? []) as MessageRow[];
+            const incoming = rows.map(mapMessageRow).reverse();
+
+            set((s) => {
+              const prev = s.messagesByConversationId[conversationId] ?? [];
+              return {
+                messagesByConversationId: {
+                  ...s.messagesByConversationId,
+                  [conversationId]: mergeMessages(prev, incoming),
+                },
+              };
+            });
+          } catch (e) {
+            console.warn('[chatStore] poll tick failed', safeErrorDetails(e));
+          }
+        };
+
+        pollTimer = setInterval(() => {
+          void tick();
+        }, 7000);
+
+        void tick();
+      };
+
+      void (async () => {
+        try {
+          const { getAiSettingsCached } = await import('@/lib/ai/settings');
+          const s = await getAiSettingsCached();
+          if (!s.realtime_enabled) {
+            startPolling();
+          }
+        } catch (e) {
+          console.warn('[chatStore] realtime toggle load failed; defaulting to realtime', safeErrorDetails(e));
+        }
+      })();
 
       try {
         channel = supabase
@@ -495,6 +573,13 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       return () => {
         try {
+          stopped = true;
+
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+
           if (channel) {
             console.log('[chatStore] unsubscribeToConversation', { conversationId });
             supabase.removeChannel(channel);

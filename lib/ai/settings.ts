@@ -9,6 +9,7 @@ export type AiSettings = {
   mode: AiSettingsMode;
   allow_public: boolean;
   allow_private: boolean;
+  realtime_enabled: boolean;
   prompts: Record<string, string>;
 };
 
@@ -17,6 +18,7 @@ const DEFAULT_AI_SETTINGS: AiSettings = {
   mode: 'off',
   allow_public: true,
   allow_private: true,
+  realtime_enabled: true,
   prompts: {},
 };
 
@@ -51,6 +53,22 @@ function normalizePrompts(input: unknown): Record<string, string> {
   return out;
 }
 
+const REALTIME_PROMPT_KEY = '__realtime_enabled';
+
+function promptBool(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
+    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  return null;
+}
+
 function normalizeAiSettingsRow(row: unknown): AiSettings {
   const r = row as Record<string, unknown>;
 
@@ -58,14 +76,28 @@ function normalizeAiSettingsRow(row: unknown): AiSettings {
   const allowPublicRaw = r.allow_public ?? r.public_chat_enabled;
   const allowPrivateRaw = r.allow_private ?? r.private_chat_enabled;
 
+  const prompts = normalizePrompts(r.prompts);
+  const realtimeRaw = r.realtime_enabled ?? r.realtimeEnabled ?? prompts[REALTIME_PROMPT_KEY];
+  const realtime = promptBool(realtimeRaw) ?? DEFAULT_AI_SETTINGS.realtime_enabled;
+
   return {
     enabled: typeof enabledRaw === 'boolean' ? enabledRaw : DEFAULT_AI_SETTINGS.enabled,
     mode: normalizeMode(r.mode),
     allow_public: typeof allowPublicRaw === 'boolean' ? allowPublicRaw : DEFAULT_AI_SETTINGS.allow_public,
     allow_private: typeof allowPrivateRaw === 'boolean' ? allowPrivateRaw : DEFAULT_AI_SETTINGS.allow_private,
-    prompts: normalizePrompts(r.prompts),
+    realtime_enabled: realtime,
+    prompts,
   };
 }
+
+export function withRealtimePrompt(settings: AiSettings): Record<string, string> {
+  return {
+    ...(settings.prompts ?? {}),
+    [REALTIME_PROMPT_KEY]: settings.realtime_enabled ? '1' : '0',
+  };
+}
+
+export { REALTIME_PROMPT_KEY };
 
 function normalizeLanguage(input: unknown): Language {
   if (input === 'en' || input === 'ar' || input === 'de') return input;

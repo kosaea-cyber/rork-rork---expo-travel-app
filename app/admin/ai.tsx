@@ -27,6 +27,7 @@ type AiSettingsRow = {
   public_chat_enabled: boolean;
   private_chat_enabled: boolean;
   system_prompt: string | null;
+  prompts?: Record<string, string> | null;
   updated_at?: string | null;
 };
 
@@ -43,6 +44,7 @@ const DEFAULT_SETTINGS: Omit<AiSettingsRow, 'id' | 'updated_at'> = {
   public_chat_enabled: true,
   private_chat_enabled: true,
   system_prompt: null,
+  prompts: {},
 };
 
 const MODE_OPTIONS: { value: AiMode; label: string; description: string }[] = [
@@ -133,6 +135,7 @@ export default function AdminAiSettingsPage() {
   const [publicChatEnabled, setPublicChatEnabled] = useState<boolean>(DEFAULT_SETTINGS.public_chat_enabled);
   const [privateChatEnabled, setPrivateChatEnabled] = useState<boolean>(DEFAULT_SETTINGS.private_chat_enabled);
   const [systemPrompt, setSystemPrompt] = useState<string>(DEFAULT_SETTINGS.system_prompt ?? '');
+  const [realtimeEnabled, setRealtimeEnabled] = useState<boolean>(true);
 
   const isBusy = ui.status === 'loading' || ui.status === 'saving';
 
@@ -150,6 +153,7 @@ export default function AdminAiSettingsPage() {
         setPublicChatEnabled(DEFAULT_SETTINGS.public_chat_enabled);
         setPrivateChatEnabled(DEFAULT_SETTINGS.private_chat_enabled);
         setSystemPrompt(DEFAULT_SETTINGS.system_prompt ?? '');
+        setRealtimeEnabled(true);
         setUi({ status: 'ready' });
         return;
       }
@@ -159,6 +163,8 @@ export default function AdminAiSettingsPage() {
       setPublicChatEnabled(s.public_chat_enabled);
       setPrivateChatEnabled(s.private_chat_enabled);
       setSystemPrompt(s.system_prompt ?? '');
+      const promptVal = s.prompts?.__realtime_enabled ?? null;
+      setRealtimeEnabled(!(promptVal === '0' || promptVal === 'false' || promptVal === 'off'));
       setUi({ status: 'ready' });
     } catch (e) {
       console.error('[admin/ai] load failed', e);
@@ -186,6 +192,9 @@ export default function AdminAiSettingsPage() {
         public_chat_enabled: publicChatEnabled,
         private_chat_enabled: privateChatEnabled,
         system_prompt: systemPrompt.trim().length > 0 ? systemPrompt : null,
+        prompts: {
+          __realtime_enabled: realtimeEnabled ? '1' : '0',
+        },
         updated_at: new Date().toISOString(),
       };
 
@@ -222,7 +231,7 @@ export default function AdminAiSettingsPage() {
       console.error('[admin/ai] save failed', e);
       setUi({ status: 'error', message: 'Failed to save. Please try again.' });
     }
-  }, [isEnabled, mode, privateChatEnabled, publicChatEnabled, systemPrompt]);
+  }, [isEnabled, mode, privateChatEnabled, publicChatEnabled, realtimeEnabled, systemPrompt]);
 
   const modeCards = useMemo(() => {
     return MODE_OPTIONS.map((opt) => {
@@ -311,6 +320,28 @@ export default function AdminAiSettingsPage() {
         </View>
 
         <View style={styles.modeGrid}>{modeCards}</View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Chat delivery</Text>
+          <Text style={styles.sectionSubtitle}>Realtime subscriptions can be disabled if they cause performance issues</Text>
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={styles.rowText}>
+              <Text style={styles.label}>Realtime updates</Text>
+              <Text style={styles.help}>If off, chat uses polling every ~7 seconds</Text>
+            </View>
+            <Switch
+              testID="adminAi.realtimeEnabled"
+              value={realtimeEnabled}
+              onValueChange={setRealtimeEnabled}
+              thumbColor={Platform.OS === 'android' ? colors.background : undefined}
+              trackColor={{ false: colors.border, true: colors.tint }}
+              disabled={isBusy}
+            />
+          </View>
+        </View>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Allowed chats</Text>

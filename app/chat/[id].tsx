@@ -19,6 +19,7 @@ export default function ChatScreen() {
   const {
     conversations,
     messagesByConversationId,
+    hasMoreByConversationId,
     fetchMessages,
     sendMessage,
     subscribeToConversation,
@@ -66,7 +67,10 @@ export default function ChatScreen() {
     [conversationId, conversations]
   );
 
-  const messages = messagesByConversationId[conversationId] ?? [];
+  const messages = useMemo<Message[]>(() => {
+    if (!conversationId) return [];
+    return messagesByConversationId[conversationId] ?? [];
+  }, [conversationId, messagesByConversationId]);
 
   const preferredLanguage = useProfileStore((s) => s.preferredLanguage);
   const bannerText = useMemo(() => {
@@ -84,6 +88,27 @@ export default function ChatScreen() {
   }, []);
   const flatListRef = useRef<FlatList<Message>>(null);
 
+  const hasMore = useMemo(() => {
+    if (!conversationId) return false;
+    return hasMoreByConversationId[conversationId] ?? false;
+  }, [conversationId, hasMoreByConversationId]);
+
+  const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
+
+  const onLoadOlder = useCallback(async () => {
+    if (!conversationId) return;
+    const oldest = messages[0]?.createdAt ?? null;
+    if (!oldest) return;
+
+    try {
+      setIsLoadingOlder(true);
+      console.log('[chat] load older', { conversationId, before: oldest });
+      await fetchMessages(conversationId, 30, oldest);
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }, [conversationId, fetchMessages, messages]);
+
   const mode: SendMode = useMemo(() => {
     if (isAdmin) return 'admin';
     if (conversation?.type === 'public') return user ? 'public_auth' : 'public_guest';
@@ -92,7 +117,7 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!conversationId) return;
-    void fetchMessages(conversationId, 60);
+    void fetchMessages(conversationId, 30);
   }, [conversationId, fetchMessages]);
 
   useEffect(() => {
@@ -208,6 +233,18 @@ export default function ChatScreen() {
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          messages.length > 0 && hasMore ? (
+            <TouchableOpacity
+              testID="chat.loadOlder"
+              onPress={onLoadOlder}
+              disabled={isLoadingOlder}
+              style={[styles.loadOlderBtn, isLoadingOlder ? { opacity: 0.6 } : null]}
+            >
+              <Text style={styles.loadOlderText}>{isLoadingOlder ? 'Loading…' : 'Load older'}</Text>
+            </TouchableOpacity>
+          ) : null
+        }
       />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
@@ -277,6 +314,21 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
     paddingBottom: 20,
+  },
+  loadOlderBtn: {
+    alignSelf: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.card,
+  },
+  loadOlderText: {
+    color: Colors.text,
+    fontSize: 12,
+    fontWeight: '700',
   },
   messageContainer: {
     maxWidth: '80%',
