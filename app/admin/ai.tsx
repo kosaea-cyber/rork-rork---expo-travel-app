@@ -20,12 +20,14 @@ import { supabase } from '@/lib/supabase/client';
 type AiMode = 'off' | 'auto_reply' | 'human_handoff';
 
 type AiSettingsRow = {
-  id: string;
+  id?: string;
+  key: string;
   is_enabled: boolean;
   mode: AiMode;
   public_chat_enabled: boolean;
   private_chat_enabled: boolean;
   system_prompt: string | null;
+  updated_at?: string | null;
 };
 
 type UiState =
@@ -34,12 +36,13 @@ type UiState =
   | { status: 'saving' }
   | { status: 'error'; message: string };
 
-const DEFAULT_SETTINGS: Omit<AiSettingsRow, 'id'> = {
+const DEFAULT_SETTINGS: Omit<AiSettingsRow, 'id' | 'updated_at'> = {
+  key: 'default',
   is_enabled: false,
   mode: 'off',
   public_chat_enabled: true,
   private_chat_enabled: true,
-  system_prompt: '',
+  system_prompt: null,
 };
 
 const MODE_OPTIONS: { value: AiMode; label: string; description: string }[] = [
@@ -48,16 +51,16 @@ const MODE_OPTIONS: { value: AiMode; label: string; description: string }[] = [
   { value: 'human_handoff', label: 'Human handoff', description: 'Queue for human follow-up (no auto replies).' },
 ];
 
-async function fetchOrCreateAiSettings(): Promise<AiSettingsRow> {
-  console.log('[admin/ai] fetchOrCreateAiSettings');
+async function fetchAiSettingsDefaultKey(): Promise<AiSettingsRow | null> {
+  console.log('[admin/ai] fetchAiSettingsDefaultKey');
 
   const existingRes = await supabase
     .from('ai_settings')
-    .select('id,is_enabled,mode,public_chat_enabled,private_chat_enabled,system_prompt')
-    .limit(1)
+    .select('*')
+    .eq('key', 'default')
     .maybeSingle();
 
-  console.log('[admin/ai] select ai_settings result', {
+  console.log('[admin/ai] select ai_settings key=default result', {
     hasData: Boolean(existingRes.data),
     error: existingRes.error?.message ?? null,
   });
@@ -66,49 +69,18 @@ async function fetchOrCreateAiSettings(): Promise<AiSettingsRow> {
     throw new Error(existingRes.error.message);
   }
 
-  if (existingRes.data) {
-    const row = existingRes.data as AiSettingsRow;
-    return {
-      id: row.id,
-      is_enabled: Boolean(row.is_enabled),
-      mode: (row.mode ?? 'off') as AiMode,
-      public_chat_enabled: Boolean(row.public_chat_enabled),
-      private_chat_enabled: Boolean(row.private_chat_enabled),
-      system_prompt: row.system_prompt ?? '',
-    };
-  }
+  if (!existingRes.data) return null;
 
-  console.log('[admin/ai] ai_settings empty - inserting default row');
-
-  const insertRes = await supabase
-    .from('ai_settings')
-    .insert({
-      is_enabled: DEFAULT_SETTINGS.is_enabled,
-      mode: DEFAULT_SETTINGS.mode,
-      public_chat_enabled: DEFAULT_SETTINGS.public_chat_enabled,
-      private_chat_enabled: DEFAULT_SETTINGS.private_chat_enabled,
-      system_prompt: DEFAULT_SETTINGS.system_prompt,
-    })
-    .select('id,is_enabled,mode,public_chat_enabled,private_chat_enabled,system_prompt')
-    .single();
-
-  console.log('[admin/ai] insert ai_settings result', {
-    hasData: Boolean(insertRes.data),
-    error: insertRes.error?.message ?? null,
-  });
-
-  if (insertRes.error || !insertRes.data) {
-    throw new Error(insertRes.error?.message ?? 'Failed to create default AI settings');
-  }
-
-  const created = insertRes.data as AiSettingsRow;
+  const row = existingRes.data as AiSettingsRow;
   return {
-    id: created.id,
-    is_enabled: Boolean(created.is_enabled),
-    mode: (created.mode ?? 'off') as AiMode,
-    public_chat_enabled: Boolean(created.public_chat_enabled),
-    private_chat_enabled: Boolean(created.private_chat_enabled),
-    system_prompt: created.system_prompt ?? '',
+    id: row.id,
+    key: row.key ?? 'default',
+    is_enabled: Boolean(row.is_enabled),
+    mode: (row.mode ?? 'off') as AiMode,
+    public_chat_enabled: Boolean(row.public_chat_enabled),
+    private_chat_enabled: Boolean(row.private_chat_enabled),
+    system_prompt: row.system_prompt ?? null,
+    updated_at: row.updated_at ?? null,
   };
 }
 
@@ -116,7 +88,6 @@ export default function AdminAiSettingsPage() {
   const mountedRef = useRef<boolean>(true);
 
   const [ui, setUi] = useState<UiState>({ status: 'loading' });
-  const [rowId, setRowId] = useState<string | null>(null);
 
   const [isEnabled, setIsEnabled] = useState<boolean>(DEFAULT_SETTINGS.is_enabled);
   const [mode, setMode] = useState<AiMode>(DEFAULT_SETTINGS.mode);
@@ -130,10 +101,20 @@ export default function AdminAiSettingsPage() {
     setUi({ status: 'loading' });
 
     try {
-      const s = await fetchOrCreateAiSettings();
+      const s = await fetchAiSettingsDefaultKey();
       if (!mountedRef.current) return;
 
-      setRowId(s.id);
+      if (!s) {
+        console.log('[admin/ai] no ai_settings row for key=default; using local defaults');
+        setIsEnabled(DEFAULT_SETTINGS.is_enabled);
+        setMode(DEFAULT_SETTINGS.mode);
+        setPublicChatEnabled(DEFAULT_SETTINGS.public_chat_enabled);
+        setPrivateChatEnabled(DEFAULT_SETTINGS.private_chat_enabled);
+        setSystemPrompt(DEFAULT_SETTINGS.system_prompt ?? '');
+        setUi({ status: 'ready' });
+        return;
+      }
+
       setIsEnabled(s.is_enabled);
       setMode(s.mode);
       setPublicChatEnabled(s.public_chat_enabled);
@@ -156,38 +137,36 @@ export default function AdminAiSettingsPage() {
   }, [load]);
 
   const onSave = useCallback(async () => {
-    if (!rowId) {
-      console.log('[admin/ai] cannot save: missing rowId');
-      setUi({ status: 'error', message: 'Missing AI settings row. Please retry.' });
-      return;
-    }
-
     setUi({ status: 'saving' });
 
     try {
-      console.log('[admin/ai] saving ai_settings', {
-        rowId,
+      const payload: Omit<AiSettingsRow, 'id'> = {
+        key: 'default',
         is_enabled: isEnabled,
         mode,
         public_chat_enabled: publicChatEnabled,
         private_chat_enabled: privateChatEnabled,
-        system_prompt_len: systemPrompt.length,
+        system_prompt: systemPrompt.trim().length > 0 ? systemPrompt : null,
+        updated_at: new Date().toISOString(),
+      };
+
+      console.log('[admin/ai] upserting ai_settings', {
+        key: payload.key,
+        is_enabled: payload.is_enabled,
+        mode: payload.mode,
+        public_chat_enabled: payload.public_chat_enabled,
+        private_chat_enabled: payload.private_chat_enabled,
+        system_prompt_len: (payload.system_prompt ?? '').length,
+        updated_at: payload.updated_at,
       });
 
       const res = await supabase
         .from('ai_settings')
-        .update({
-          is_enabled: isEnabled,
-          mode,
-          public_chat_enabled: publicChatEnabled,
-          private_chat_enabled: privateChatEnabled,
-          system_prompt: systemPrompt,
-        })
-        .eq('id', rowId)
-        .select('id')
-        .single();
+        .upsert(payload, { onConflict: 'key' })
+        .select('*')
+        .maybeSingle();
 
-      console.log('[admin/ai] update result', {
+      console.log('[admin/ai] upsert result', {
         ok: Boolean(res.data) && !res.error,
         error: res.error?.message ?? null,
       });
@@ -197,13 +176,14 @@ export default function AdminAiSettingsPage() {
         return;
       }
 
+
       setUi({ status: 'ready' });
       Alert.alert('Saved', 'AI settings updated successfully.');
     } catch (e) {
       console.error('[admin/ai] save failed', e);
       setUi({ status: 'error', message: 'Failed to save. Please try again.' });
     }
-  }, [isEnabled, mode, privateChatEnabled, publicChatEnabled, rowId, systemPrompt]);
+  }, [isEnabled, mode, privateChatEnabled, publicChatEnabled, systemPrompt]);
 
   const modeCards = useMemo(() => {
     return MODE_OPTIONS.map((opt) => {
