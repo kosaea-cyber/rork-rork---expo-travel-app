@@ -16,6 +16,8 @@ import { useRouter } from 'expo-router';
 import { Search, ArrowUpDown, UserRound, Shield, ShieldOff, X, CalendarDays } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
+import { paged } from '@/lib/supabase/queries';
+import { normalizeSupabaseError } from '@/lib/utils/supabaseError';
 
 type ProfileRole = 'admin' | 'customer';
 type ProfileLanguage = 'en' | 'ar' | 'de';
@@ -40,7 +42,7 @@ type DateRange = {
   to: string;
 };
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 20;
 
 function formatDateShort(iso: string | null | undefined): string {
   if (!iso) return '—';
@@ -118,7 +120,7 @@ export default function CustomersPage() {
   const [dateRange, setDateRange] = useState<DateRange>({ from: '', to: '' });
   const [sort, setSort] = useState<SortKey>('newest');
 
-  const [page, setPage] = useState<number>(0);
+  const [cursorValue, setCursorValue] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState<boolean>(true);
 
   const [filtersOpen, setFiltersOpen] = useState<boolean>(false);
@@ -129,12 +131,12 @@ export default function CustomersPage() {
   }, [dateRange, language, role, search, sort]);
 
   const buildQuery = useCallback(
-    (pageIndex: number) => {
+    (cursor: string | null) => {
       const q = search.trim();
 
       let qb = supabase
         .from('profiles')
-        .select('id, full_name, phone, preferred_language, role, created_at, is_blocked', { count: 'exact' });
+        .select('id, full_name, phone, preferred_language, role, created_at, is_blocked');
 
       if (q) {
         const escaped = q.replaceAll(',', '');
@@ -159,18 +161,15 @@ export default function CustomersPage() {
         qb = qb.lte('created_at', dateOnlyToEndIso(toDate));
       }
 
-      if (sort === 'name_az') {
-        qb = qb.order('full_name', { ascending: true, nullsFirst: false });
-        qb = qb.order('created_at', { ascending: false });
-      } else if (sort === 'oldest') {
-        qb = qb.order('created_at', { ascending: true, nullsFirst: false });
-      } else {
-        qb = qb.order('created_at', { ascending: false, nullsFirst: false });
-      }
+      const cursorField: keyof ProfileRow & string = sort === 'name_az' ? 'full_name' : 'created_at';
+      const direction = sort === 'oldest' || sort === 'name_az' ? 'asc' : 'desc';
 
-      const from = pageIndex * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-      qb = qb.range(from, to);
+      qb = paged<ProfileRow>(qb as any, {
+        limit: PAGE_SIZE,
+        cursorField,
+        cursorValue: cursor,
+        direction,
+      });
 
       console.log('[admin/customers] buildQuery', {
         q,
@@ -179,8 +178,9 @@ export default function CustomersPage() {
         dateFrom: fromDate,
         dateTo: toDate,
         sort,
-        pageIndex,
-        range: { from, to },
+        cursorField,
+        cursor,
+        pageSize: PAGE_SIZE,
       });
 
       return qb;
@@ -189,7 +189,7 @@ export default function CustomersPage() {
   );
 
   const fetchPage = useCallback(
-    async (pageIndex: number, mode: 'replace' | 'append') => {
+    async (cursor: string | null, mode: 'replace' | 'append') => {
       if (mode === 'replace') {
         setLoading(true);
       } else {
@@ -198,14 +198,13 @@ export default function CustomersPage() {
       setError(null);
 
       try {
-        const res = await buildQuery(pageIndex);
-        const { data, error: qErr, count } = await res;
+        const res = await buildQuery(cursor);
+        const { data, error: qErr } = await res;
 
         console.log('[admin/customers] query result', {
-          pageIndex,
           mode,
           returned: data?.length ?? 0,
-          count: count ?? null,
+          cursor,
           error: qErr?.message ?? null,
         });
 
@@ -215,44 +214,49 @@ export default function CustomersPage() {
 
         const next = (data ?? []) as ProfileRow[];
         setItems((prev) => (mode === 'replace' ? next : [...prev, ...next]));
-        setPage(pageIndex);
 
-        const total = count ?? null;
-        if (total != null) {
-          setHasMore((pageIndex + 1) * PAGE_SIZE < total);
-        } else {
-          setHasMore(next.length === PAGE_SIZE);
-        }
+        const last = next[next.length - 1];
+        const nextCursor =
+          last != null
+            ? String((sort === 'name_az' ? (last.full_name ?? '') : last.created_at) ?? '')
+            : '';
+
+        setCursorValue(nextCursor.length ? nextCursor : null);
+        setHasMore(next.length === PAGE_SIZE);
       } catch (e) {
         console.error('[admin/customers] fetchPage error', e);
-        setError('Failed to load customers. Please try again.');
+        setError(normalizeSupabaseError(e));
         if (mode === 'replace') setItems([]);
       } finally {
         setLoading(false);
         setLoadingMore(false);
       }
     },
-    [buildQuery]
+    [buildQuery, sort]
   );
 
   useEffect(() => {
-    fetchPage(0, 'replace').catch((e) => {
+    setCursorValue(null);
+    setHasMore(true);
+    fetchPage(null, 'replace').catch((e) => {
       console.error('[admin/customers] initial fetch error', e);
     });
   }, [fetchPage, queryParamsKey]);
 
   const onRetry = useCallback(() => {
-    fetchPage(0, 'replace').catch((e) => {
+    setCursorValue(null);
+    setHasMore(true);
+    fetchPage(null, 'replace').catch((e) => {
       console.error('[admin/customers] retry fetch error', e);
     });
   }, [fetchPage]);
 
   const onLoadMore = useCallback(() => {
     if (!hasMore || loadingMore || loading) return;
-    fetchPage(page + 1, 'append').catch((e) => {
+    fetchPage(cursorValue, 'append').catch((e) => {
       console.error('[admin/customers] load more error', e);
     });
-  }, [fetchPage, hasMore, loading, loadingMore, page]);
+  }, [cursorValue, fetchPage, hasMore, loading, loadingMore]);
 
   const askAndToggleRole = useCallback(
     async (profile: ProfileRow) => {
@@ -455,7 +459,9 @@ export default function CustomersPage() {
           }}
           refreshing={loading}
           onRefresh={() => {
-            fetchPage(0, 'replace').catch((e) => console.error('[admin/customers] refresh error', e));
+            setCursorValue(null);
+            setHasMore(true);
+            fetchPage(null, 'replace').catch((e) => console.error('[admin/customers] refresh error', e));
           }}
           ListEmptyComponent={
             <View style={styles.empty} testID="adminCustomersEmpty">
