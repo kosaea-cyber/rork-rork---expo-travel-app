@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { useRouter } from 'expo-router';
 import colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
+import { getJwtClaimString } from '@/lib/supabase/jwt';
 
 export type AdminGuardState =
   | { status: 'checking' }
@@ -36,7 +37,7 @@ export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<
   const check = React.useCallback(async () => {
     redirectedRef.current = false;
     if (mountedRef.current) setState({ status: 'checking' });
-    console.log('[AdminGuard] checking session + role');
+    console.log('[AdminGuard] checking session + jwt role');
 
     const { data, error } = await supabase.auth.getSession();
     console.log('[AdminGuard] auth.getSession result', {
@@ -54,23 +55,16 @@ export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<
     }
 
     const userId = session.user.id;
+    const jwtRole = getJwtClaimString(session.access_token, 'role');
 
-    const profileRes = await supabase.from('profiles').select('role').eq('id', userId).maybeSingle();
-
-    console.log('[AdminGuard] profiles role check', {
+    console.log('[AdminGuard] jwt role check', {
       userId,
-      role: profileRes.data?.role ?? null,
-      error: profileRes.error?.message ?? null,
+      jwtRole: jwtRole ?? null,
     });
 
     if (!mountedRef.current) return;
 
-    if (profileRes.error) {
-      setState({ status: 'error', message: 'Unable to verify admin access. Please try again.' });
-      return;
-    }
-
-    if (profileRes.data?.role === 'admin') {
+    if (jwtRole === 'admin') {
       setState({ status: 'allowed', userId });
       return;
     }

@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase/client';
 import { User } from '@/lib/db/types';
 import { useProfileStore } from '@/store/profileStore';
 import { useI18nStore } from '@/store/i18nStore';
+import { getJwtClaimString } from '@/lib/supabase/jwt';
 
 interface AuthState {
   user: User | null;
@@ -62,7 +63,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       const profileRes = await supabase
         .from('profiles')
-        .select('id, role, preferred_language, full_name, phone')
+        .select('id, role, preferred_language, full_name, phone, is_blocked')
         .eq('id', sessionUser.id)
         .maybeSingle();
 
@@ -90,8 +91,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       }
 
+      const jwtRole = getJwtClaimString(data.session?.access_token, 'role');
       const role = (profileRes.data?.role ?? 'customer') as 'admin' | 'customer';
       const preferredLanguage = (profileRes.data?.preferred_language ?? 'en') as 'en' | 'ar' | 'de';
+
+      const isBlocked = Boolean(profileRes.data?.is_blocked);
+      console.log('[authStore] role sources', {
+        profileRole: role,
+        jwtRole: jwtRole ?? null,
+        isBlocked,
+      });
+
+      if (isBlocked) {
+        console.warn('[authStore] profile is_blocked=true; signing out');
+        try {
+          await supabase.auth.signOut();
+        } catch (e) {
+          console.error('[authStore] signOut for blocked user failed', e);
+        }
+        useProfileStore.getState().clearProfile();
+        set({ isLoading: false, user: null, isAdmin: false, isGuest: false });
+        return;
+      }
 
       try {
         void useI18nStore.getState().hydrateFromProfile(preferredLanguage);
@@ -110,7 +131,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         status: 'active',
       };
 
-      set({ user: mappedUser, isAdmin: role === 'admin', isGuest: false, isLoading: false });
+      const isAdmin = jwtRole === 'admin' || role === 'admin';
+      set({ user: mappedUser, isAdmin, isGuest: false, isLoading: false });
     } catch (e) {
       console.error('[authStore] checkAuth failed', e);
       set({ isLoading: false, user: null, isAdmin: false, isGuest: false });
