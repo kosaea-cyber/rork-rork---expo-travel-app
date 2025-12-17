@@ -21,7 +21,7 @@ type AiMode = 'off' | 'auto_reply' | 'human_handoff';
 
 type AiSettingsRow = {
   id?: string;
-  key: string;
+  key?: string | null;
   is_enabled: boolean;
   mode: AiMode;
   public_chat_enabled: boolean;
@@ -51,27 +51,66 @@ const MODE_OPTIONS: { value: AiMode; label: string; description: string }[] = [
   { value: 'human_handoff', label: 'Human handoff', description: 'Queue for human follow-up (no auto replies).' },
 ];
 
+function isMissingColumnError(msg: string | null | undefined) {
+  const m = (msg ?? '').toLowerCase();
+  return m.includes('does not exist') || m.includes('unknown column');
+}
+
 async function fetchAiSettingsDefaultKey(): Promise<AiSettingsRow | null> {
   console.log('[admin/ai] fetchAiSettingsDefaultKey');
 
-  const existingRes = await supabase
+  const byKeyRes = await supabase
     .from('ai_settings')
     .select('*')
     .eq('key', 'default')
     .maybeSingle();
 
   console.log('[admin/ai] select ai_settings key=default result', {
-    hasData: Boolean(existingRes.data),
-    error: existingRes.error?.message ?? null,
+    hasData: Boolean(byKeyRes.data),
+    error: byKeyRes.error?.message ?? null,
   });
 
-  if (existingRes.error) {
-    throw new Error(existingRes.error.message);
+  if (byKeyRes.error && isMissingColumnError(byKeyRes.error.message)) {
+    console.log('[admin/ai] ai_settings.key missing; falling back to first row');
+
+    const fallbackRes = await supabase
+      .from('ai_settings')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    console.log('[admin/ai] select ai_settings fallback result', {
+      hasData: Boolean(fallbackRes.data),
+      error: fallbackRes.error?.message ?? null,
+    });
+
+    if (fallbackRes.error) {
+      throw new Error(fallbackRes.error.message);
+    }
+
+    if (!fallbackRes.data) return null;
+
+    const row = fallbackRes.data as AiSettingsRow;
+    return {
+      id: row.id,
+      key: row.key ?? null,
+      is_enabled: Boolean(row.is_enabled),
+      mode: (row.mode ?? 'off') as AiMode,
+      public_chat_enabled: Boolean(row.public_chat_enabled),
+      private_chat_enabled: Boolean(row.private_chat_enabled),
+      system_prompt: row.system_prompt ?? null,
+      updated_at: row.updated_at ?? null,
+    };
   }
 
-  if (!existingRes.data) return null;
+  if (byKeyRes.error) {
+    throw new Error(byKeyRes.error.message);
+  }
 
-  const row = existingRes.data as AiSettingsRow;
+  if (!byKeyRes.data) return null;
+
+  const row = byKeyRes.data as AiSettingsRow;
   return {
     id: row.id,
     key: row.key ?? 'default',
