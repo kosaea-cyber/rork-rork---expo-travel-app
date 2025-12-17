@@ -1,6 +1,7 @@
 import { Slot, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/store/authStore";
@@ -90,7 +91,9 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <StatusBar style="light" />
-        <Slot />
+        <ErrorBoundary>
+          <Slot />
+        </ErrorBoundary>
       </GestureHandlerRootView>
     </QueryClientProvider>
   );

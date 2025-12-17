@@ -3,10 +3,17 @@ const expoConfig = require('eslint-config-expo/flat');
 
 module.exports = defineConfig([
   {
-    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts', 'expo/types/router.d.ts', '**/expo/types/router.d.ts'],
     linterOptions: {
-      reportUnusedDisableDirectives: 'off',
+      reportUnusedDisableDirectives: false,
     },
+    ignores: [
+      '.expo/**',
+      '**/.expo/**',
+      '.expo/types/**',
+      '**/.expo/types/**',
+      'expo/**',
+      '**/expo/**',
+    ],
   },
   {
     ignores: [
@@ -18,7 +25,7 @@ module.exports = defineConfig([
   },
   {
     linterOptions: {
-      reportUnusedDisableDirectives: 'off',
+      reportUnusedDisableDirectives: false,
     },
     rules: {
       'eslint-comments/no-unused-disable': 'off',
@@ -45,13 +52,13 @@ module.exports = defineConfig([
     ...c,
     linterOptions: {
       ...(c.linterOptions ?? {}),
-      reportUnusedDisableDirectives: 'off',
+      reportUnusedDisableDirectives: false,
     },
   })),
   {
     // Ensure this stays OFF even if eslint-config-expo enables it.
     linterOptions: {
-      reportUnusedDisableDirectives: 'off',
+      reportUnusedDisableDirectives: false,
     },
     rules: {
       'eslint-comments/no-unused-disable': 'off',
@@ -87,7 +94,7 @@ module.exports = defineConfig([
   {
     // Final override
     linterOptions: {
-      reportUnusedDisableDirectives: 'off',
+      reportUnusedDisableDirectives: false,
     },
     rules: {
       'eslint-comments/no-unused-disable': 'off',
@@ -97,7 +104,7 @@ module.exports = defineConfig([
   },
   {
     linterOptions: {
-      reportUnusedDisableDirectives: 'off',
+      reportUnusedDisableDirectives: false,
     },
   },
   {
@@ -119,8 +126,41 @@ module.exports = defineConfig([
   },
   {
     linterOptions: {
-      reportUnusedDisableDirectives: 'off',
+      reportUnusedDisableDirectives: false,
     },
+  },
+  {
+    linterOptions: {
+      reportUnusedDisableDirectives: false,
+    },
+  },
+  {
+    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts'],
+    linterOptions: {
+      reportUnusedDisableDirectives: false,
+    },
+    rules: {
+      'eslint-comments/no-unused-disable': 'off',
+      'eslint-comments/disable-enable-pair': 'off',
+    },
+  },  {
+    linterOptions: {
+      reportUnusedDisableDirectives: false,
+    },
+    ignores: [
+      '.expo/**',
+      '**/.expo/**',
+      '.expo/types/**',
+      '**/.expo/types/**',
+      '.expo/types/router.d.ts',
+      '**/.expo/types/router.d.ts',
+      'expo/**',
+      '**/expo/**',
+      'expo/types/**',
+      '**/expo/types/**',
+      'expo/types/router.d.ts',
+      '**/expo/types/router.d.ts',
+    ],
   },
 
 ]);
