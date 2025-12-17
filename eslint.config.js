@@ -3,6 +3,16 @@ const expoConfig = require('eslint-config-expo/flat');
 
 module.exports = defineConfig([
   {
+    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts'],
+    linterOptions: {
+      reportUnusedDisableDirectives: 'off',
+    },
+    rules: {
+      'eslint-comments/no-unused-disable': 'off',
+      'eslint-comments/disable-enable-pair': 'off',
+    },
+  },
+  {
     linterOptions: {
       reportUnusedDisableDirectives: 'off',
     },
@@ -12,10 +22,14 @@ module.exports = defineConfig([
     },
     ignores: [
       'dist/*',
+      '.expo/types/router.d.ts',
+      '**/.expo/types/router.d.ts',
       '.expo/**',
       '**/.expo/**',
       '.expo/types/**',
       '**/.expo/types/**',
+      'expo/types/router.d.ts',
+      '**/expo/types/router.d.ts',
       'expo/**',
       '**/expo/**',
       'expo/types/**',
@@ -43,12 +57,16 @@ module.exports = defineConfig([
   {
     // Hard-ignore Expo Router generated types (can contain eslint-disable banners).
     ignores: [
+      '.expo/types/router.d.ts',
+      '**/.expo/types/router.d.ts',
       '.expo/**',
       '**/.expo/**',
       '**/.expo/**/*',
       '.expo/types/**',
       '**/.expo/types/**',
       '**/.expo/types/**/*',
+      'expo/types/router.d.ts',
+      '**/expo/types/router.d.ts',
       'expo/**',
       '**/expo/**',
       'expo/types/**',
@@ -81,15 +99,29 @@ module.exports = defineConfig([
   {
     // Final hard-ignore (must be last so nothing re-includes these files).
     ignores: [
+      '.expo/types/router.d.ts',
+      '**/.expo/types/router.d.ts',
       '.expo/**',
       '**/.expo/**',
       '.expo/types/**',
       '**/.expo/types/**',
+      'expo/types/router.d.ts',
+      '**/expo/types/router.d.ts',
       'expo/**',
       '**/expo/**',
       'expo/types/**',
       '**/expo/types/**',
     ],
+  },
+  {
+    files: ['.expo/types/router.d.ts', '**/.expo/types/router.d.ts', 'expo/types/router.d.ts', '**/expo/types/router.d.ts'],
+    linterOptions: {
+      reportUnusedDisableDirectives: 'off',
+    },
+    rules: {
+      'eslint-comments/no-unused-disable': 'off',
+      'eslint-comments/disable-enable-pair': 'off',
+    },
   },
   {
     // Absolute last: disable unused eslint-disable checks everywhere.

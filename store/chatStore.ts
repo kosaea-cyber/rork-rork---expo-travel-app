@@ -425,10 +425,25 @@ export const useChatStore = create<ChatState>((set, get) => {
       let pollTimer: ReturnType<typeof setInterval> | null = null;
       let stopped = false;
 
-      const startPolling = () => {
-        if (pollTimer) return;
+      const stopRealtime = () => {
+        if (!channel) return;
+        try {
+          console.log('[chatStore] stopRealtime', { conversationId });
+          supabase.removeChannel(channel);
+          delete channelsByConversationId[conversationId];
+        } catch (e) {
+          console.warn('[chatStore] stopRealtime failed', safeErrorDetails(e));
+        } finally {
+          channel = null;
+        }
+      };
 
-        console.log('[chatStore] realtime disabled -> polling', { conversationId });
+      const startPolling = () => {
+        if (pollTimer || stopped) return;
+
+        console.log('[chatStore] polling enabled', { conversationId });
+        stopRealtime();
+
         set((s) => ({
           realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'polling' },
           realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
@@ -437,9 +452,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         const tick = async () => {
           try {
             if (stopped) return;
-            const existing = get().messagesByConversationId[conversationId] ?? [];
-            const latest = existing[existing.length - 1]?.createdAt ?? null;
 
+            const existingMessages = get().messagesByConversationId[conversationId] ?? [];
+            const latest = existingMessages[existingMessages.length - 1]?.createdAt ?? null;
             console.log('[chatStore] poll tick', { conversationId, latest });
 
             const { data, error } = await supabase
@@ -478,98 +493,118 @@ export const useChatStore = create<ChatState>((set, get) => {
         void tick();
       };
 
+      const startRealtime = () => {
+        if (stopped || channel) return;
+
+        console.log('[chatStore] realtime enabled', { conversationId });
+
+        set((s) => ({
+          realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'connecting' },
+          realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
+        }));
+
+        try {
+          channel = supabase
+            .channel(`messages:${conversationId}`)
+            .on(
+              'postgres_changes',
+              { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
+              (payload) => {
+                try {
+                  const row = payload.new as unknown as MessageRow;
+                  const msg = mapMessageRow(row);
+
+                  console.log('[chatStore] realtime message INSERT', {
+                    conversationId,
+                    id: msg.id,
+                    senderType: msg.senderType,
+                  });
+
+                  set((s) => {
+                    const existingMessages = s.messagesByConversationId[conversationId] ?? [];
+                    const knownConv = s.conversations.find((c) => c.id === conversationId) ?? null;
+
+                    return {
+                      messagesByConversationId: {
+                        ...s.messagesByConversationId,
+                        [conversationId]: mergeMessages(existingMessages, [msg]),
+                      },
+                      conversations: upsertConversation(s.conversations, {
+                        id: conversationId,
+                        type: knownConv?.type ?? 'private',
+                        customerId: knownConv?.customerId ?? null,
+                        createdAt: knownConv?.createdAt ?? new Date().toISOString(),
+                        lastMessageAt: msg.createdAt,
+                        lastMessagePreview: msg.body.slice(0, 80),
+                        lastSenderType: msg.senderType,
+                        unreadCountAdmin: knownConv?.unreadCountAdmin ?? 0,
+                        unreadCountUser: knownConv?.unreadCountUser ?? 0,
+                      }),
+                    };
+                  });
+                } catch (e) {
+                  console.error('[chatStore] realtime payload handling failed', safeErrorDetails(e));
+                }
+              }
+            )
+            .subscribe((status) => {
+              console.log('[chatStore] realtime status', { conversationId, status });
+
+              if (status === 'SUBSCRIBED') {
+                set((s) => ({
+                  realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'subscribed' },
+                  realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
+                }));
+              } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                const errText = status === 'CHANNEL_ERROR' ? 'Realtime channel error' : 'Realtime timed out';
+
+                set((s) => ({
+                  realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
+                  realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: errText },
+                }));
+
+                startPolling();
+              } else if (status === 'CLOSED') {
+                set((s) => ({
+                  realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'closed' },
+                }));
+              }
+            });
+
+          if (channel) {
+            channelsByConversationId[conversationId] = channel;
+          }
+        } catch (e) {
+          console.error('[chatStore] startRealtime failed', safeErrorDetails(e));
+          set((s) => ({
+            realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
+            realtimeErrorByConversationId: {
+              ...s.realtimeErrorByConversationId,
+              [conversationId]: (safeErrorDetails(e).message as string | null) ?? 'Realtime subscribe failed',
+            },
+          }));
+
+          startPolling();
+        }
+      };
+
       void (async () => {
         try {
           const { getAiSettingsCached } = await import('@/lib/ai/settings');
           const s = await getAiSettingsCached();
-          if (!s.realtime_enabled) {
+
+          if (stopped) return;
+
+          if (s.realtime_enabled) {
+            startRealtime();
+          } else {
             startPolling();
           }
         } catch (e) {
           console.warn('[chatStore] realtime toggle load failed; defaulting to realtime', safeErrorDetails(e));
+          startRealtime();
         }
       })();
-
-      try {
-        channel = supabase
-          .channel(`messages:${conversationId}`)
-          .on(
-            'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId}` },
-            (payload) => {
-              try {
-                const row = payload.new as unknown as MessageRow;
-                const msg = mapMessageRow(row);
-
-                console.log('[chatStore] realtime message INSERT', {
-                  conversationId,
-                  id: msg.id,
-                  senderType: msg.senderType,
-                });
-
-                set((s) => {
-                  const existingMessages = s.messagesByConversationId[conversationId] ?? [];
-                  const knownConv = s.conversations.find((c) => c.id === conversationId) ?? null;
-
-                  return {
-                    messagesByConversationId: {
-                      ...s.messagesByConversationId,
-                      [conversationId]: mergeMessages(existingMessages, [msg]),
-                    },
-                    conversations: upsertConversation(s.conversations, {
-                      id: conversationId,
-                      type: knownConv?.type ?? 'private',
-                      customerId: knownConv?.customerId ?? null,
-                      createdAt: knownConv?.createdAt ?? new Date().toISOString(),
-                      lastMessageAt: msg.createdAt,
-                      lastMessagePreview: msg.body.slice(0, 80),
-                      lastSenderType: msg.senderType,
-                      unreadCountAdmin: knownConv?.unreadCountAdmin ?? 0,
-                      unreadCountUser: knownConv?.unreadCountUser ?? 0,
-                    }),
-                  };
-                });
-              } catch (e) {
-                console.error('[chatStore] realtime payload handling failed', safeErrorDetails(e));
-              }
-            }
-          )
-          .subscribe((status) => {
-            console.log('[chatStore] realtime status', { conversationId, status });
-
-            if (status === 'SUBSCRIBED') {
-              set((s) => ({
-                realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'subscribed' },
-                realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
-              }));
-            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-              set((s) => ({
-                realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
-                realtimeErrorByConversationId: {
-                  ...s.realtimeErrorByConversationId,
-                  [conversationId]: status === 'CHANNEL_ERROR' ? 'Realtime channel error' : 'Realtime timed out',
-                },
-              }));
-            } else if (status === 'CLOSED') {
-              set((s) => ({
-                realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'closed' },
-              }));
-            }
-          });
-
-        if (channel) {
-          channelsByConversationId[conversationId] = channel;
-        }
-      } catch (e) {
-        console.error('[chatStore] subscribeToConversation failed', safeErrorDetails(e));
-        set((s) => ({
-          realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
-          realtimeErrorByConversationId: {
-            ...s.realtimeErrorByConversationId,
-            [conversationId]: (safeErrorDetails(e).message as string | null) ?? 'Realtime subscribe failed',
-          },
-        }));
-      }
 
       return () => {
         try {
@@ -580,11 +615,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             pollTimer = null;
           }
 
-          if (channel) {
-            console.log('[chatStore] unsubscribeToConversation', { conversationId });
-            supabase.removeChannel(channel);
-            delete channelsByConversationId[conversationId];
-          }
+          stopRealtime();
 
           set((s) => ({
             realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'closed' },
