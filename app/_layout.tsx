@@ -1,6 +1,6 @@
 import { Slot, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -55,10 +55,16 @@ export default function RootLayout() {
     };
   }, [checkAuth, router]);
 
+  const primaryRouteSegment = useMemo(() => {
+    const segs = Array.isArray(segments) ? segments : [];
+    const firstNonGroup = segs.find((s) => !(s.startsWith("(") && s.endsWith(")")));
+    return firstNonGroup ?? null;
+  }, [segments]);
+
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = segments[0] === "auth";
+    const inAuthGroup = primaryRouteSegment === "auth";
     const isAuthenticated = Boolean(user) || Boolean(isGuest);
 
     console.log('RootLayout Check:', { 
@@ -81,7 +87,7 @@ export default function RootLayout() {
       console.log('Redirecting to Home (Authenticated User in Auth Group)');
       router.replace("/(tabs)/home");
     }
-  }, [user, isGuest, isLoading, segments, router]);
+  }, [user, isGuest, isLoading, segments, primaryRouteSegment, router]);
 
   if (isLoading) {
     return null; // Or a custom splash component
