@@ -22,6 +22,7 @@ type PackageRow = {
   image_url: string | null;
   price_amount: number | null;
   price_currency: string | null;
+  price_type: 'fixed' | 'starting_from' | null;
 };
 
 function getLocalizedText(row: PackageRow, key: 'title' | 'description', lang: PreferredLanguage): string {
@@ -36,17 +37,30 @@ function getLocalizedText(row: PackageRow, key: 'title' | 'description', lang: P
   return (v ?? fallback ?? '').trim();
 }
 
-function formatPrice(row: PackageRow): string | null {
+function getStartingFromLabel(lang: PreferredLanguage): string {
+  if (lang === 'ar') return 'ابتداءً من';
+  if (lang === 'de') return 'Ab';
+  return 'Starting from';
+}
+
+function formatPrice(row: PackageRow, lang: PreferredLanguage): string | null {
   if (row.price_amount == null || !row.price_currency) return null;
+  let formatted = '';
   try {
-    return new Intl.NumberFormat(undefined, {
+    formatted = new Intl.NumberFormat(undefined, {
       style: 'currency',
       currency: row.price_currency,
       maximumFractionDigits: 2,
     }).format(row.price_amount);
   } catch {
-    return `${row.price_amount} ${row.price_currency}`;
+    formatted = `${row.price_amount} ${row.price_currency}`;
   }
+
+  if (row.price_type === 'starting_from') {
+    return `${getStartingFromLabel(lang)} ${formatted}`;
+  }
+
+  return formatted;
 }
 
 export default function PackageDetailsScreen() {
@@ -68,7 +82,7 @@ export default function PackageDetailsScreen() {
       const { data, error } = await supabase
         .from('packages')
         .select(
-          'id, category_id, is_active, sort_order, title_en, title_ar, title_de, description_en, description_ar, description_de, image_url, price_amount, price_currency',
+          'id, category_id, is_active, sort_order, title_en, title_ar, title_de, description_en, description_ar, description_de, image_url, price_amount, price_currency, price_type',
         )
         .eq('id', id as string)
         .maybeSingle();
@@ -103,8 +117,8 @@ export default function PackageDetailsScreen() {
 
   const price = useMemo(() => {
     if (!pkgData) return null;
-    return formatPrice(pkgData);
-  }, [pkgData]);
+    return formatPrice(pkgData, language);
+  }, [language, pkgData]);
 
   const handleBook = useCallback(() => {
     if (!pkgData) return;

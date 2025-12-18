@@ -21,6 +21,7 @@ type PackageRow = {
   image_url: string | null;
   price_amount: number | null;
   price_currency: string | null;
+  price_type: 'fixed' | 'starting_from' | null;
 };
 
 function getLocalizedText(row: PackageRow, key: 'title' | 'description', lang: PreferredLanguage): string {
@@ -66,7 +67,7 @@ export default function BookingRequestScreen() {
       const { data, error } = await supabase
         .from('packages')
         .select(
-          'id, category_id, title_en, title_ar, title_de, description_en, description_ar, description_de, image_url, price_amount, price_currency',
+          'id, category_id, title_en, title_ar, title_de, description_en, description_ar, description_de, image_url, price_amount, price_currency, price_type',
         )
         .eq('id', packageId as string)
         .maybeSingle();
