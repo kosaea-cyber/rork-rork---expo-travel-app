@@ -7,6 +7,7 @@ import { useI18nStore } from '@/constants/i18n';
 import { supabase } from '@/lib/supabase/client';
 import { useAuthStore } from '@/store/authStore';
 import { useProfileStore, type PreferredLanguage } from '@/store/profileStore';
+import { formatPrice } from '@/lib/utils/formatPrice';
 
 type PackageRow = {
   id: string;
@@ -37,31 +38,6 @@ function getLocalizedText(row: PackageRow, key: 'title' | 'description', lang: P
   return (v ?? fallback ?? '').trim();
 }
 
-function getStartingFromLabel(lang: PreferredLanguage): string {
-  if (lang === 'ar') return 'ابتداءً من';
-  if (lang === 'de') return 'Ab';
-  return 'Starting from';
-}
-
-function formatPrice(row: PackageRow, lang: PreferredLanguage): string | null {
-  if (row.price_amount == null || !row.price_currency) return null;
-  let formatted = '';
-  try {
-    formatted = new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency: row.price_currency,
-      maximumFractionDigits: 2,
-    }).format(row.price_amount);
-  } catch {
-    formatted = `${row.price_amount} ${row.price_currency}`;
-  }
-
-  if (row.price_type === 'starting_from') {
-    return `${getStartingFromLabel(lang)} ${formatted}`;
-  }
-
-  return formatted;
-}
 
 export default function PackageDetailsScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
