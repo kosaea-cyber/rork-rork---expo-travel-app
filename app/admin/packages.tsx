@@ -38,6 +38,7 @@ type PackageRow = {
   image_url: string | null;
   price_amount: number | null;
   price_currency: string | null;
+  price_type: 'fixed' | 'starting_from' | null;
   created_at: string;
   updated_at: string | null;
 };
@@ -56,6 +57,7 @@ type EditablePackage = {
   image_url: string;
   price_amount: string;
   price_currency: string;
+  price_type: 'fixed' | 'starting_from';
 };
 
 function normalizePackage(row?: PackageRow | null): EditablePackage {
@@ -73,6 +75,7 @@ function normalizePackage(row?: PackageRow | null): EditablePackage {
     image_url: row?.image_url ?? '',
     price_amount: row?.price_amount != null ? String(row.price_amount) : '',
     price_currency: row?.price_currency ?? 'AED',
+    price_type: row?.price_type ?? 'fixed',
   };
 }
 
@@ -103,7 +106,7 @@ export default function AdminPackages() {
       const { data, error } = await supabase
         .from('packages')
         .select(
-          'id, category_id, is_active, sort_order, title_en, title_ar, title_de, description_en, description_ar, description_de, image_url, price_amount, price_currency, created_at, updated_at',
+          'id, category_id, is_active, sort_order, title_en, title_ar, title_de, description_en, description_ar, description_de, image_url, price_amount, price_currency, price_type, created_at, updated_at',
         )
         .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true });
@@ -138,6 +141,7 @@ export default function AdminPackages() {
         image_url: payload.image_url || null,
         price_amount: priceAmount,
         price_currency: payload.price_currency || null,
+        price_type: payload.price_type,
       };
 
       const { error } = await supabase.from('packages').insert(insertRow);
@@ -170,6 +174,7 @@ export default function AdminPackages() {
         image_url: payload.image_url || null,
         price_amount: priceAmount,
         price_currency: payload.price_currency || null,
+        price_type: payload.price_type,
         updated_at: new Date().toISOString(),
       };
 
@@ -220,6 +225,7 @@ export default function AdminPackages() {
     setEditing({
       ...normalizePackage(null),
       category_id: first?.id ?? '',
+      price_type: 'fixed',
     });
     setModalVisible(true);
   }, [categories]);
@@ -251,6 +257,7 @@ export default function AdminPackages() {
       ...editing,
       category_id: editing.category_id.trim(),
       sort_order: Number.isFinite(editing.sort_order) ? editing.sort_order : 0,
+      price_type: editing.price_type ?? 'fixed',
     };
 
     setFormError(null);
@@ -281,6 +288,15 @@ export default function AdminPackages() {
   const renderItem = useCallback(
     ({ item }: { item: PackageRow }) => {
       const catLabel = item.category_id ? (categoryLabelById.get(item.category_id) ?? item.category_id) : '—';
+      const title = (item.title_en ?? '').trim() || '(UNTITLED)';
+      const pricePrefix = item.price_type === 'starting_from' ? 'Starting from ' : '';
+      const priceText =
+        item.price_amount != null && item.price_currency
+          ? `${pricePrefix}${item.price_amount} ${item.price_currency}`
+          : item.price_amount != null
+            ? `${pricePrefix}${item.price_amount}`
+            : '—';
+
       return (
         <View style={styles.card} testID={`admin-package-card-${item.id}`}>
           {item.image_url ? <Image source={{ uri: item.image_url }} style={styles.image} /> : null}
@@ -288,10 +304,13 @@ export default function AdminPackages() {
             <View style={styles.headerRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.title} numberOfLines={1}>
-                  {(item.title_en ?? '').trim() || '(UNTITLED)'}
+                  {title}
                 </Text>
                 <Text style={styles.meta} numberOfLines={2}>
                   category: {catLabel}
+                </Text>
+                <Text style={styles.meta} numberOfLines={1}>
+                  price: {priceText}
                 </Text>
               </View>
 
@@ -299,7 +318,11 @@ export default function AdminPackages() {
                 <Pressable testID={`admin-package-edit-${item.id}`} onPress={() => openEdit(item)} style={styles.actionBtn}>
                   <Edit2 size={20} color={Colors.tint} />
                 </Pressable>
-                <Pressable testID={`admin-package-delete-${item.id}`} onPress={() => onDelete(item)} style={styles.actionBtn}>
+                <Pressable
+                  testID={`admin-package-delete-${item.id}`}
+                  onPress={() => onDelete(item)}
+                  style={styles.actionBtn}
+                >
                   <Trash2 size={20} color={Colors.error} />
                 </Pressable>
               </View>
@@ -416,13 +439,7 @@ export default function AdminPackages() {
                     style={styles.pickerBackdrop}
                     onPress={() => setCategoryPickerOpen(false)}
                   >
-                    <Pressable
-                      testID="admin-package-category-picker"
-                      style={styles.pickerSheet}
-                      onPress={() => {
-                        return;
-                      }}
-                    >
+                    <Pressable testID="admin-package-category-picker" style={styles.pickerSheet} onPress={() => null}>
                       <Text style={styles.pickerTitle}>Choose category</Text>
                       <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingVertical: 6 }}>
                         {categories.map((c) => {
@@ -525,6 +542,31 @@ export default function AdminPackages() {
                       autoCapitalize="characters"
                     />
                   </View>
+                </View>
+
+                <Text style={styles.label}>Price Type</Text>
+                <View style={styles.row}>
+                  <Pressable
+                    testID="admin-package-price-type-fixed"
+                    style={[styles.chip, editing.price_type === 'fixed' && styles.chipActive]}
+                    onPress={() => setEditing({ ...editing, price_type: 'fixed' })}
+                  >
+                    <Text style={[styles.chipText, editing.price_type === 'fixed' && styles.chipTextActive]}>
+                      Fixed price
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    testID="admin-package-price-type-starting"
+                    style={[styles.chip, editing.price_type === 'starting_from' && styles.chipActive]}
+                    onPress={() => setEditing({ ...editing, price_type: 'starting_from' })}
+                  >
+                    <Text
+                      style={[styles.chipText, editing.price_type === 'starting_from' && styles.chipTextActive]}
+                    >
+                      Starting from
+                    </Text>
+                  </Pressable>
                 </View>
 
                 <View style={styles.row}>
@@ -706,6 +748,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     maxWidth: 180,
+    flex: 1,
   },
   chipActive: {
     borderColor: Colors.tint,
