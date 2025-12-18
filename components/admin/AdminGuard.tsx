@@ -3,7 +3,6 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { useRouter } from 'expo-router';
 import colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
-import { getJwtClaimString } from '@/lib/supabase/jwt';
 
 export type AdminGuardState =
   | { status: 'checking' }
@@ -18,8 +17,9 @@ type AdminGuardProps = {
 export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<void> } {
   const router = useRouter();
   const [state, setState] = useState<AdminGuardState>({ status: 'checking' });
-  const mountedRef = useRef<boolean>(true);
-  const redirectedRef = useRef<boolean>(false);
+
+  const mountedRef = useRef(true);
+  const redirectedRef = useRef(false);
 
   type ReplaceArg = Parameters<ReturnType<typeof useRouter>['replace']>[0];
 
@@ -37,7 +37,8 @@ export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<
   const check = React.useCallback(async () => {
     redirectedRef.current = false;
     if (mountedRef.current) setState({ status: 'checking' });
-    console.log('[AdminGuard] checking session + jwt role');
+
+    console.log('[AdminGuard] checking session + profiles.role');
 
     const { data, error } = await supabase.auth.getSession();
     console.log('[AdminGuard] auth.getSession result', {
@@ -55,16 +56,29 @@ export function useAdminGuard(): { state: AdminGuardState; retry: () => Promise<
     }
 
     const userId = session.user.id;
-    const jwtRole = getJwtClaimString(session.access_token, 'role');
 
-    console.log('[AdminGuard] jwt role check', {
-      userId,
-      jwtRole: jwtRole ?? null,
+    console.log('[AdminGuard] fetching profiles.role', { userId });
+
+    const { data: profile, error: profErr } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    console.log('[AdminGuard] profiles.role result', {
+      hasProfile: Boolean(profile),
+      role: profile?.role ?? null,
+      error: profErr?.message ?? null,
     });
 
     if (!mountedRef.current) return;
 
-    if (jwtRole === 'admin') {
+    if (profErr) {
+      setState({ status: 'error', message: profErr.message });
+      return;
+    }
+
+    if (profile?.role === 'admin') {
       setState({ status: 'allowed', userId });
       return;
     }
@@ -101,12 +115,10 @@ export default function AdminGuard({ children }: AdminGuardProps) {
           <Text style={styles.title}>Admin access required</Text>
           <Text style={styles.subtitle}>You don’t have permission to view this page.</Text>
           <Pressable
-            testID="admin-guard-go-home"
+            testID="admin-guard-recheck"
             style={styles.retryBtn}
             onPress={() => {
-              retry().catch((e: unknown) => {
-                console.error('[AdminGuard] re-check error', e);
-              });
+              retry().catch((e: unknown) => console.error('[AdminGuard] re-check error', e));
             }}
           >
             <Text style={styles.retryText}>Re-check access</Text>
@@ -124,9 +136,7 @@ export default function AdminGuard({ children }: AdminGuardProps) {
             testID="admin-guard-retry"
             style={styles.retryBtn}
             onPress={() => {
-              retry().catch((e: unknown) => {
-                console.error('[AdminGuard] retry error', e);
-              });
+              retry().catch((e: unknown) => console.error('[AdminGuard] retry error', e));
             }}
           >
             <Text style={styles.retryText}>Retry</Text>
