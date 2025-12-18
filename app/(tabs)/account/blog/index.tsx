@@ -65,6 +65,7 @@ export default function BlogListScreen() {
           'id,is_active,created_at,published_at,cover_image_url,title_en,title_ar,title_de,excerpt_en,excerpt_ar,excerpt_de'
         )
         .eq('is_active', true)
+        .not('published_at', 'is', null)
         .order('published_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false });
 
@@ -93,7 +94,9 @@ export default function BlogListScreen() {
         <TouchableOpacity
           testID={`blog-card-${item.id}`}
           style={styles.card}
-          onPress={() => router.push(`/(tabs)/account/blog/${item.id}`)}
+          onPress={() =>
+            router.push({ pathname: '/(tabs)/account/blog/[id]', params: { id: item.id } })
+          }
           activeOpacity={0.85}
         >
           {item.cover_image_url ? (

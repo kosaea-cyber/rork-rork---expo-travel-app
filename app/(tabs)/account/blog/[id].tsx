@@ -63,6 +63,8 @@ export default function BlogPostScreen() {
           'id,is_active,created_at,published_at,cover_image_url,title_en,title_ar,title_de,body_en,body_ar,body_de'
         )
         .eq('id', postId)
+        .eq('is_active', true)
+        .not('published_at', 'is', null)
         .maybeSingle();
 
       if (error) {
@@ -74,9 +76,6 @@ export default function BlogPostScreen() {
         throw new Error('Post not found');
       }
 
-      if (data.is_active === false) {
-        throw new Error('Post is not available');
-      }
 
       return data as BlogPostDetailsRow;
     },

@@ -5,6 +5,7 @@ import HomeChatWidget from '@/components/chat/HomeChatWidget';
 import Hero from '@/components/home/Hero';
 import ServiceCategories from '@/components/home/ServiceCategories';
 import FeaturedPackages from '@/components/home/FeaturedPackages';
+import BlogPreview from '@/components/home/BlogPreview';
 import AirportSteps from '@/components/home/AirportSteps';
 import HeaderLogo from '@/components/HeaderLogo';
 
@@ -20,6 +21,7 @@ export default function HomeScreen() {
           <Hero />
           <ServiceCategories />
           <FeaturedPackages />
+          <BlogPreview />
           <AirportSteps />
         </ScrollView>
       </SafeAreaView>
