@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AlertTriangle, RefreshCcw } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+
 import Colors from '@/constants/colors';
 import { type Language } from '@/constants/i18n';
 import { useProfileStore } from '@/store/profileStore';
@@ -29,51 +31,52 @@ type ServiceCategoryRow = {
   created_at: string;
 };
 
-function getLocalizedDbField(row: ServiceCategoryRow, field: 'title' | 'description', lang: Language): string {
-  const key = `${field}_${lang}` as const;
-  const fallbackEn = `${field}_en` as const;
-  const value = row[key as keyof ServiceCategoryRow];
-  if (typeof value === 'string' && value.length > 0) return value;
-  const en = row[fallbackEn as keyof ServiceCategoryRow];
-  if (typeof en === 'string' && en.length > 0) return en;
+function getLocalizedDbField(
+  row: ServiceCategoryRow,
+  field: 'title' | 'description',
+  lang: Language
+): string {
+  const localizedKey = `${field}_${lang}` as keyof ServiceCategoryRow;
+  const fallbackKey = `${field}_en` as keyof ServiceCategoryRow;
+
+  const localized = row[localizedKey];
+  if (typeof localized === 'string' && localized.length > 0) return localized;
+
+  const fallback = row[fallbackKey];
+  if (typeof fallback === 'string' && fallback.length > 0) return fallback;
+
   return '';
 }
 
 export default function ServiceCategories() {
   const router = useRouter();
-  const preferredLanguage = useProfileStore((state) => state.preferredLanguage);
+  const preferredLanguage = useProfileStore((s) => s.preferredLanguage);
   const language = (preferredLanguage ?? 'en') as Language;
 
   const [categories, setCategories] = useState<ServiceCategoryRow[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const loadCategories = useCallback(async () => {
-    console.log('[categories] loadCategories start');
     setLoading(true);
     setError(null);
 
     try {
-      const res = await supabase
+      const { data, error } = await supabase
         .from('service_categories')
         .select('*')
         .eq('is_active', true)
         .order('sort_order', { ascending: true });
 
-      console.log('[categories] service_categories query', {
-        count: res.data?.length ?? 0,
-        error: res.error?.message ?? null,
-      });
-
-      if (res.error) {
+      if (error) {
         setCategories([]);
-        setError(res.error.message);
+        setError(error.message);
         return;
       }
 
-      setCategories((res.data ?? []) as ServiceCategoryRow[]);
+      setCategories((data ?? []) as ServiceCategoryRow[]);
     } catch (e) {
-      console.error('[categories] service_categories query unexpected error', e);
+      console.error('[ServiceCategories] load error', e);
       setCategories([]);
       setError('Failed to load categories.');
     } finally {
@@ -95,22 +98,31 @@ export default function ServiceCategories() {
         <TouchableOpacity
           testID={`home-category-${item.id}`}
           style={styles.card}
-          onPress={() => router.push({ pathname: '/(tabs)/services', params: { category: item.id } })}
           activeOpacity={0.9}
+          onPress={() =>
+            router.push({
+              pathname: '/(tabs)/services',
+              params: { category: item.id },
+            })
+          }
         >
           <ImageBackground
             source={imageUrl ? { uri: imageUrl } : undefined}
             style={styles.cardBg}
             imageStyle={styles.cardBgImg}
           >
-            <View style={styles.cardOverlay}>
-              <Text style={styles.cardTitle} numberOfLines={2}>
+            <LinearGradient
+              colors={['rgba(0,0,0,0)', 'rgba(10,25,47,0.95)']}
+              locations={[0.25, 1]}
+              style={styles.cardOverlay}
+            >
+              <Text style={styles.cardTitle} numberOfLines={1}>
                 {title}
               </Text>
-              <Text style={styles.cardSubtitle} numberOfLines={2}>
+              <Text style={styles.cardSubtitle} numberOfLines={1}>
                 {description}
               </Text>
-            </View>
+            </LinearGradient>
           </ImageBackground>
         </TouchableOpacity>
       );
@@ -131,15 +143,13 @@ export default function ServiceCategories() {
     if (error) {
       return (
         <View style={styles.stateWrap}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <AlertTriangle color={Colors.textSecondary} size={18} />
-            <Text style={styles.stateText} numberOfLines={2}>
-              Couldn’t load categories.
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <AlertTriangle size={18} color={Colors.textSecondary} />
+            <Text style={styles.stateText}>Couldn’t load categories.</Text>
           </View>
 
-          <TouchableOpacity testID="home-categories-retry" style={styles.retryBtn} onPress={loadCategories}>
-            <RefreshCcw color={Colors.background} size={16} />
+          <TouchableOpacity style={styles.retryBtn} onPress={loadCategories}>
+            <RefreshCcw size={16} color={Colors.background} />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -151,7 +161,7 @@ export default function ServiceCategories() {
         <Text style={styles.stateText}>No categories available.</Text>
       </View>
     );
-  }, [error, loadCategories, loading]);
+  }, [error, loading, loadCategories]);
 
   return (
     <View style={styles.container} testID="home-categories">
@@ -194,9 +204,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   cardOverlay: {
-    padding: 14,
-    gap: 6,
-    backgroundColor: 'rgba(10, 25, 47, 0.78)',
+    paddingHorizontal: 14,
+    paddingTop: 28,
+    paddingBottom: 12,
+    gap: 4,
   },
   cardTitle: {
     color: '#ffffff',
@@ -205,10 +216,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   cardSubtitle: {
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.85)',
     fontSize: 12,
     fontWeight: '600',
-    lineHeight: 16,
   },
   stateWrap: {
     minWidth: 220,
@@ -231,7 +241,6 @@ const styles = StyleSheet.create({
   retryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 14,
     height: 36,
