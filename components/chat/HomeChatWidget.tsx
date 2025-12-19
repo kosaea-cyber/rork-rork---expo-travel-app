@@ -220,10 +220,7 @@ export default function HomeChatWidget() {
     const trimmed = draft.trim();
     if (!trimmed) return;
 
-    if (!user) {
-      showToast('Please sign in to send messages.');
-      return;
-    }
+    const mode = user ? 'public_auth' : 'public_guest';
 
     const now = Date.now();
     if (now - lastSendAtRef.current < 3000) {
@@ -235,7 +232,7 @@ export default function HomeChatWidget() {
     setDraft('');
     setLocalError(null);
 
-    const sent = await sendMessage(convId, trimmed, 'public_auth');
+    const sent = await sendMessage(convId, trimmed, mode);
     if (!sent) {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
@@ -314,7 +311,7 @@ export default function HomeChatWidget() {
                     Chat
                   </Text>
                   <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestLabel">
-                    {user ? 'Signed in' : 'Guest (sign in required to send)'}
+                    {user ? 'Signed in' : 'Guest'}
                   </Text>
 
                   {realtimeHealth === 'error' ? (
@@ -403,8 +400,8 @@ export default function HomeChatWidget() {
                   <TextInput
                     value={draft}
                     onChangeText={setDraft}
-                    editable={Boolean(user)}
-                    placeholder={user ? 'Write a message…' : 'Sign in to message'}
+                    editable
+                    placeholder={'Write a message…'}
                     placeholderTextColor={Colors.textSecondary}
                     style={styles.input}
                     multiline
@@ -414,10 +411,10 @@ export default function HomeChatWidget() {
 
                 <Pressable
                   onPress={onSend}
-                  disabled={!draft.trim() || !conversation?.id || !user}
+                  disabled={!draft.trim() || !conversation?.id}
                   style={({ pressed }) => [
                     styles.sendButton,
-                    (!draft.trim() || !conversation?.id || !user) && styles.sendButtonDisabled,
+                    (!draft.trim() || !conversation?.id) && styles.sendButtonDisabled,
                     pressed && styles.sendButtonPressed,
                   ]}
                   testID="homeChatWidgetSendButton"
@@ -460,11 +457,10 @@ const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   kbRoot: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12, paddingBottom: 12 },
 
-  // ✅ FIX: use height instead of maxHeight-only
   sheet: {
     width: '100%',
     height: '82%',
-    maxHeight: 720,
+    minHeight: 420,
     borderRadius: 22,
     backgroundColor: Colors.card,
     borderWidth: 1,
