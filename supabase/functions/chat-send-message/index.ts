@@ -71,6 +71,15 @@ function getClientIp(req: Request): string {
   return 'unknown';
 }
 
+function getGuestId(req: Request): string | null {
+  const raw = req.headers.get('x-guest-id') ?? req.headers.get('X-Guest-Id');
+  const guestId = raw?.trim() ?? '';
+  if (!guestId) return null;
+  if (guestId.length > 128) return null;
+  if (!/^[a-zA-Z0-9_-]+$/.test(guestId)) return null;
+  return guestId;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
     return jsonResponse(405, { error: { message: 'Method not allowed', status: 405 } });
@@ -112,6 +121,11 @@ Deno.serve(async (req: Request) => {
 
   const token = getBearerToken(req);
   const ip = getClientIp(req);
+  const guestId = mode === 'public_guest' ? getGuestId(req) : null;
+
+  if (mode === 'public_guest' && !guestId) {
+    return jsonResponse(400, { error: { message: 'Missing x-guest-id header', status: 400 } });
+  }
 
   // Auth only needed for non-guest modes
   let userId: string | null = null;
@@ -143,11 +157,13 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Cooldown: per user for auth modes, per IP for guest mode
-  const cooldownKey = mode === 'public_guest' ? `ip:${ip}` : `uid:${userId ?? 'unknown'}`;
+  // Cooldown: per user for auth modes; per guest id for guest mode (optionally scoped by IP)
+  const cooldownKey =
+    mode === 'public_guest' ? `guest:${guestId ?? 'missing'}:ip:${ip}` : `uid:${userId ?? 'unknown'}`;
   const now = Date.now();
   const last = cooldownByKey.get(cooldownKey) ?? 0;
   if (now - last < 3000) {
+    console.log('[chat-send-message] rate limit hit', { mode, cooldownKey });
     return jsonResponse(429, { error: { message: 'Please wait a moment', status: 429 } });
   }
   cooldownByKey.set(cooldownKey, now);
