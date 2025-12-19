@@ -67,16 +67,22 @@ function normalizeAiSettingsRow(row: unknown): AiSettings {
   const allowPrivateRaw = r.private_chat_enabled ?? r.allow_private ?? r.private_chat;
   const systemPromptRaw = r.system_prompt ?? r.systemPrompt;
 
+  const systemPrompt = typeof systemPromptRaw === 'string' ? systemPromptRaw : '';
+
   return {
     enabled: typeof enabledRaw === 'boolean' ? enabledRaw : DEFAULT_AI_SETTINGS.enabled,
     mode: normalizeMode(r.mode),
     allow_public: typeof allowPublicRaw === 'boolean' ? allowPublicRaw : DEFAULT_AI_SETTINGS.allow_public,
     allow_private: typeof allowPrivateRaw === 'boolean' ? allowPrivateRaw : DEFAULT_AI_SETTINGS.allow_private,
-    // Default: realtime ON (your code expects it); later we can add a real column if needed.
     realtime_enabled: DEFAULT_AI_SETTINGS.realtime_enabled,
-    // prompts not in DB yet; keep empty (or we can map from system_prompt if you want)
-    prompts: {},
-    system_prompt: typeof systemPromptRaw === 'string' ? systemPromptRaw : '',
+    prompts: systemPrompt
+      ? {
+          en: systemPrompt,
+          ar: systemPrompt,
+          de: systemPrompt,
+        }
+      : {},
+    system_prompt: systemPrompt,
   };
 }
 
@@ -90,13 +96,21 @@ export async function getAiSettings(): Promise<AiSettings> {
   try {
     console.log('[ai][settings] getAiSettings');
 
-    // No "key" column; just read the newest row (or the only row)
-    const res = await supabase
-      .from('ai_settings')
-      .select('*')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const base = supabase.from('ai_settings').select('*');
+
+    // Load the most recent row.
+    // Do NOT filter by key (some deployments don't have a "key" column).
+    // Prefer updated_at if present; otherwise fall back to created_at.
+    let res = await base.order('updated_at', { ascending: false }).limit(1).maybeSingle();
+
+    if (res.error) {
+      console.warn('[ai][settings] load failed ordering by updated_at; falling back to created_at', {
+        message: res.error.message,
+        code: (res.error as { code?: string }).code ?? null,
+      });
+
+      res = await base.order('created_at', { ascending: false }).limit(1).maybeSingle();
+    }
 
     if (res.error) {
       console.error('[ai][settings] load failed', {
