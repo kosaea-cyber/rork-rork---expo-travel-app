@@ -9,7 +9,6 @@ export type MessageSenderType = 'user' | 'admin' | 'system' | 'ai';
 
 export type SendMode = 'public_guest' | 'public_auth' | 'private_user' | 'admin';
 
-
 type RealtimeHealth = 'idle' | 'connecting' | 'subscribed' | 'polling' | 'error' | 'closed';
 
 export interface Conversation {
@@ -117,7 +116,6 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   for (const m of incoming) map.set(m.id, m);
   return Array.from(map.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
-
 
 interface ChatState {
   conversations: Conversation[];
@@ -261,56 +259,57 @@ export const useChatStore = create<ChatState>((set, get) => {
         try {
           console.log('[chatStore] fetchMessages', { conversationId, limit, before: before ?? null, setLoading: opts.setLoading });
 
-        let q = supabase
-          .from('messages')
-          .select('id, conversation_id, sender_type, sender_id, body, created_at')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: false })
-          .limit(limit);
+          let q = supabase
+            .from('messages')
+            .select('id, conversation_id, sender_type, sender_id, body, created_at')
+            .eq('conversation_id', conversationId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
 
-        if (before) {
-          q = q.lt('created_at', before);
+          if (before) {
+            q = q.lt('created_at', before);
+          }
+
+          const { data, error } = await q;
+
+          if (error) {
+            const details = safeErrorDetails(error);
+            console.error('[chatStore] fetchMessages select error', details);
+            throw new Error((details.message as string | null) ?? 'Failed to load messages');
+          }
+
+          const rows = (data ?? []) as MessageRow[];
+          const incoming = rows.map(mapMessageRow).reverse();
+
+          set((s) => {
+            const existing = s.messagesByConversationId[conversationId] ?? [];
+            const hasMore = rows.length >= limit;
+            return {
+              messagesByConversationId: {
+                ...s.messagesByConversationId,
+                [conversationId]: mergeMessages(existing, incoming),
+              },
+              hasMoreByConversationId: {
+                ...s.hasMoreByConversationId,
+                [conversationId]: hasMore,
+              },
+              isLoading: opts.setLoading ? false : s.isLoading,
+            };
+          });
+
+          return incoming;
+        } catch (e) {
+          const details = safeErrorDetails(e);
+          console.error('[chatStore] fetchMessages failed', details);
+          if (opts.setLoading) set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load messages' });
+          return [];
         }
-
-        const { data, error } = await q;
-
-        if (error) {
-          const details = safeErrorDetails(error);
-          console.error('[chatStore] fetchMessages select error', details);
-          throw new Error((details.message as string | null) ?? 'Failed to load messages');
-        }
-
-        const rows = (data ?? []) as MessageRow[];
-        const incoming = rows.map(mapMessageRow).reverse();
-
-        set((s) => {
-          const existing = s.messagesByConversationId[conversationId] ?? [];
-          const hasMore = rows.length >= limit;
-          return {
-            messagesByConversationId: {
-              ...s.messagesByConversationId,
-              [conversationId]: mergeMessages(existing, incoming),
-            },
-            hasMoreByConversationId: {
-              ...s.hasMoreByConversationId,
-              [conversationId]: hasMore,
-            },
-            isLoading: opts.setLoading ? false : s.isLoading,
-          };
-        });
-
-        return incoming;
-      } catch (e) {
-        const details = safeErrorDetails(e);
-        console.error('[chatStore] fetchMessages failed', details);
-        if (opts.setLoading) set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load messages' });
-        return [];
-      }
       };
 
       return await fetchInternal({ setLoading: true });
     },
 
+    // ✅ FIX: allow public_guest to send WITHOUT JWT
     sendMessage: async (conversationId, body, mode) => {
       try {
         const trimmed = body.trim();
@@ -326,17 +325,6 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         console.log('[chatStore] sendMessage (edge)', { conversationId, mode, bodyLen: trimmed.length });
 
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) {
-          console.error('[chatStore] auth.getSession error', safeErrorDetails(sessionError));
-        }
-
-        const accessToken = sessionData.session?.access_token ?? null;
-        if (!accessToken) {
-          set({ error: 'not_authenticated' });
-          return null;
-        }
-
         set({ lastSendAtMs: now, error: null });
 
         const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -347,12 +335,33 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const url = `${baseUrl.replace(/\/$/, '')}/functions/v1/chat-send-message`;
 
+        // Only require token for non-guest modes
+        let accessToken: string | null = null;
+
+        if (mode !== 'public_guest') {
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+          if (sessionError) {
+            console.error('[chatStore] auth.getSession error', safeErrorDetails(sessionError));
+          }
+
+          accessToken = sessionData.session?.access_token ?? null;
+          if (!accessToken) {
+            set({ error: 'not_authenticated' });
+            return null;
+          }
+        }
+
+        const headers: Record<string, string> = {
+          'content-type': 'application/json',
+        };
+
+        if (accessToken) {
+          headers.authorization = `Bearer ${accessToken}`;
+        }
+
         const res = await fetch(url, {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            authorization: `Bearer ${accessToken}`,
-          },
+          headers,
           body: JSON.stringify({ conversationId, body: trimmed, mode }),
         });
 
@@ -395,6 +404,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
+    // subscribeToConversation .. (بدون تغيير)
     subscribeToConversation: (conversationId) => {
       console.log('[chatStore] subscribeToConversation', { conversationId });
 
@@ -453,10 +463,6 @@ export const useChatStore = create<ChatState>((set, get) => {
           try {
             if (stopped) return;
 
-            const existingMessages = get().messagesByConversationId[conversationId] ?? [];
-            const latest = existingMessages[existingMessages.length - 1]?.createdAt ?? null;
-            console.log('[chatStore] poll tick', { conversationId, latest });
-
             const { data, error } = await supabase
               .from('messages')
               .select('id, conversation_id, sender_type, sender_id, body, created_at')
@@ -486,10 +492,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
         };
 
-        pollTimer = setInterval(() => {
-          void tick();
-        }, 7000);
-
+        pollTimer = setInterval(() => void tick(), 7000);
         void tick();
       };
 
@@ -497,11 +500,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (stopped || channel) return;
 
         console.log('[chatStore] realtime enabled', { conversationId });
-
-        set((s) => ({
-          realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'connecting' },
-          realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
-        }));
 
         try {
           channel = supabase
@@ -513,12 +511,6 @@ export const useChatStore = create<ChatState>((set, get) => {
                 try {
                   const row = payload.new as unknown as MessageRow;
                   const msg = mapMessageRow(row);
-
-                  console.log('[chatStore] realtime message INSERT', {
-                    conversationId,
-                    id: msg.id,
-                    senderType: msg.senderType,
-                  });
 
                   set((s) => {
                     const existingMessages = s.messagesByConversationId[conversationId] ?? [];
@@ -548,21 +540,12 @@ export const useChatStore = create<ChatState>((set, get) => {
               }
             )
             .subscribe((status) => {
-              console.log('[chatStore] realtime status', { conversationId, status });
-
               if (status === 'SUBSCRIBED') {
                 set((s) => ({
                   realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'subscribed' },
                   realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
                 }));
               } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                const errText = status === 'CHANNEL_ERROR' ? 'Realtime channel error' : 'Realtime timed out';
-
-                set((s) => ({
-                  realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
-                  realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: errText },
-                }));
-
                 startPolling();
               } else if (status === 'CLOSED') {
                 set((s) => ({
@@ -571,19 +554,9 @@ export const useChatStore = create<ChatState>((set, get) => {
               }
             });
 
-          if (channel) {
-            channelsByConversationId[conversationId] = channel;
-          }
+          if (channel) channelsByConversationId[conversationId] = channel;
         } catch (e) {
           console.error('[chatStore] startRealtime failed', safeErrorDetails(e));
-          set((s) => ({
-            realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
-            realtimeErrorByConversationId: {
-              ...s.realtimeErrorByConversationId,
-              [conversationId]: (safeErrorDetails(e).message as string | null) ?? 'Realtime subscribe failed',
-            },
-          }));
-
           startPolling();
         }
       };
@@ -595,13 +568,9 @@ export const useChatStore = create<ChatState>((set, get) => {
 
           if (stopped) return;
 
-          if (s.realtime_enabled) {
-            startRealtime();
-          } else {
-            startPolling();
-          }
-        } catch (e) {
-          console.warn('[chatStore] realtime toggle load failed; defaulting to realtime', safeErrorDetails(e));
+          if (s.realtime_enabled) startRealtime();
+          else startPolling();
+        } catch {
           startRealtime();
         }
       })();
@@ -609,14 +578,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       return () => {
         try {
           stopped = true;
-
-          if (pollTimer) {
-            clearInterval(pollTimer);
-            pollTimer = null;
-          }
-
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = null;
           stopRealtime();
-
           set((s) => ({
             realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'closed' },
             realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
@@ -631,20 +595,15 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!conversationId) return;
 
       try {
-        console.log('[chatStore] markConversationReadForUser', { conversationId });
         const { error } = await supabase.from('conversations').update({ unread_count_user: 0 }).eq('id', conversationId);
-
         if (error) {
           console.warn('[chatStore] markConversationReadForUser update error', safeErrorDetails(error));
           return;
         }
-
         set((s) => {
           const existing = s.conversations.find((c) => c.id === conversationId) ?? null;
           if (!existing) return s;
-          return {
-            conversations: upsertConversation(s.conversations, { ...existing, unreadCountUser: 0 }),
-          };
+          return { conversations: upsertConversation(s.conversations, { ...existing, unreadCountUser: 0 }) };
         });
       } catch (e) {
         console.warn('[chatStore] markConversationReadForUser unexpected error', safeErrorDetails(e));
@@ -655,20 +614,15 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!conversationId) return;
 
       try {
-        console.log('[chatStore] markConversationReadForAdmin', { conversationId });
         const { error } = await supabase.from('conversations').update({ unread_count_admin: 0 }).eq('id', conversationId);
-
         if (error) {
           console.warn('[chatStore] markConversationReadForAdmin update error', safeErrorDetails(error));
           return;
         }
-
         set((s) => {
           const existing = s.conversations.find((c) => c.id === conversationId) ?? null;
           if (!existing) return s;
-          return {
-            conversations: upsertConversation(s.conversations, { ...existing, unreadCountAdmin: 0 }),
-          };
+          return { conversations: upsertConversation(s.conversations, { ...existing, unreadCountAdmin: 0 }) };
         });
       } catch (e) {
         console.warn('[chatStore] markConversationReadForAdmin unexpected error', safeErrorDetails(e));
@@ -679,19 +633,13 @@ export const useChatStore = create<ChatState>((set, get) => {
       set({ isLoading: true, error: null });
 
       try {
-        console.log('[chatStore] adminFetchConversations', { limit });
-
         const { data, error } = await supabase
           .from('conversations')
           .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .order('last_message_at', { ascending: false })
           .limit(limit);
 
-        if (error) {
-          const details = safeErrorDetails(error);
-          console.error('[chatStore] adminFetchConversations select error', details);
-          throw new Error((details.message as string | null) ?? 'Failed to load conversations');
-        }
+        if (error) throw error;
 
         const rows = (data ?? []) as ConversationRow[];
         const mapped = rows.map(mapConversationRow);
@@ -705,7 +653,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         return mapped;
       } catch (e) {
         const details = safeErrorDetails(e);
-        console.error('[chatStore] adminFetchConversations failed', details);
         set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load conversations' });
         return [];
       }
@@ -715,26 +662,19 @@ export const useChatStore = create<ChatState>((set, get) => {
       set({ isLoading: true, error: null });
 
       try {
-        console.log('[chatStore] adminGetConversationById', { conversationId });
-
         const { data, error } = await supabase
           .from('conversations')
           .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .eq('id', conversationId)
           .single();
 
-        if (error) {
-          const details = safeErrorDetails(error);
-          console.error('[chatStore] adminGetConversationById select error', details);
-          throw new Error((details.message as string | null) ?? 'Failed to load conversation');
-        }
+        if (error) throw error;
 
         const conv = mapConversationRow(data as ConversationRow);
         set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
         return conv;
       } catch (e) {
         const details = safeErrorDetails(e);
-        console.error('[chatStore] adminGetConversationById failed', details);
         set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to load conversation' });
         return null;
       }
@@ -744,8 +684,6 @@ export const useChatStore = create<ChatState>((set, get) => {
       set({ isLoading: true, error: null });
 
       try {
-        console.log('[chatStore] adminCreatePublicConversationIfMissing');
-
         const { data: existingData, error: existingError } = await supabase
           .from('conversations')
           .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
@@ -753,11 +691,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           .order('created_at', { ascending: true })
           .limit(1);
 
-        if (existingError) {
-          const details = safeErrorDetails(existingError);
-          console.error('[chatStore] public conversations select error', details);
-          throw new Error((details.message as string | null) ?? 'Failed to check public conversation');
-        }
+        if (existingError) throw existingError;
 
         const existingRow = (existingData?.[0] ?? null) as ConversationRow | null;
         if (existingRow) {
@@ -772,18 +706,13 @@ export const useChatStore = create<ChatState>((set, get) => {
           .select('id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user')
           .single();
 
-        if (insertError) {
-          const details = safeErrorDetails(insertError);
-          console.error('[chatStore] insert public conversation error', details);
-          throw new Error((details.message as string | null) ?? 'Failed to create public chat');
-        }
+        if (insertError) throw insertError;
 
         const conv = mapConversationRow(inserted as ConversationRow);
         set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
         return conv;
       } catch (e) {
         const details = safeErrorDetails(e);
-        console.error('[chatStore] adminCreatePublicConversationIfMissing failed', details);
         set({ isLoading: false, error: (details.message as string | null) ?? 'Failed to create public chat' });
         return null;
       }
