@@ -61,13 +61,13 @@ export default function HomeChatWidget() {
   } = useChatStore();
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
-
   const language = useI18nStore((s) => s.language);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 1600);
   }, []);
+
   const publicBannerText = useMemo(() => {
     if (!conversation || conversation.type !== 'public') return null;
     return resolveAutoReplyText({ categoryKey: 'general', preferredLanguage: language });
@@ -118,7 +118,6 @@ export default function HomeChatWidget() {
       if (!conv) {
         const storeErrUnknown: unknown = useChatStore.getState().error;
         const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
-        console.error('[HomeChatWidget] no public conversation', storeErrUnknown);
 
         setLocalError(
           storeErr && storeErr.trim().length > 0
@@ -142,10 +141,9 @@ export default function HomeChatWidget() {
       console.error('[HomeChatWidget] bootstrap failed', e);
       const storeErrUnknown: unknown = useChatStore.getState().error;
       const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
+
       setLocalError(
-        storeErr && storeErr.trim().length > 0
-          ? storeErr
-          : 'Chat is temporarily unavailable. Please try again.'
+        storeErr && storeErr.trim().length > 0 ? storeErr : 'Chat is temporarily unavailable. Please try again.'
       );
       setIsBootstrapping(false);
     }
@@ -155,7 +153,6 @@ export default function HomeChatWidget() {
     if (!isOpen) return;
     animateOpen(true);
     void bootstrap();
-    return;
   }, [animateOpen, bootstrap, isOpen]);
 
   useEffect(() => {
@@ -172,9 +169,7 @@ export default function HomeChatWidget() {
   }, [conversation?.id, isOpen, subscribeToConversation]);
 
   useEffect(() => {
-    if (!isOpen) {
-      animateOpen(false);
-    }
+    if (!isOpen) animateOpen(false);
   }, [animateOpen, isOpen]);
 
   useEffect(() => {
@@ -184,27 +179,18 @@ export default function HomeChatWidget() {
     });
   }, [isOpen, messages.length]);
 
-  const onOpenPress = useCallback(() => {
-    console.log('[HomeChatWidget] open press');
-    setIsOpen(true);
-  }, []);
-
+  const onOpenPress = useCallback(() => setIsOpen(true), []);
   const onClosePress = useCallback(() => {
-    console.log('[HomeChatWidget] close press');
     setIsOpen(false);
     setDraft('');
     setLocalError(null);
   }, []);
 
-  const onRetry = useCallback(() => {
-    console.log('[HomeChatWidget] retry');
-    void bootstrap();
-  }, [bootstrap]);
+  const onRetry = useCallback(() => void bootstrap(), [bootstrap]);
 
   const onRefresh = useCallback(() => {
     const convId = conversation?.id;
     if (!convId) return;
-    console.log('[HomeChatWidget] manual refresh', { convId });
     void fetchMessages(convId, 30);
   }, [conversation?.id, fetchMessages]);
 
@@ -218,7 +204,6 @@ export default function HomeChatWidget() {
 
     try {
       setIsLoadingOlder(true);
-      console.log('[HomeChatWidget] load older', { convId, before: oldest });
       await fetchMessages(convId, 30, oldest);
     } finally {
       setIsLoadingOlder(false);
@@ -254,7 +239,6 @@ export default function HomeChatWidget() {
     if (!sent) {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
-      return;
     }
   }, [conversation?.id, draft, sendMessage, showToast, user]);
 
@@ -263,7 +247,6 @@ export default function HomeChatWidget() {
 
   const renderItem = useCallback(({ item }: { item: UiMessage }) => {
     const mine = item.senderType === 'user';
-
     return (
       <View style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowTheirs]}>
         <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
@@ -311,7 +294,7 @@ export default function HomeChatWidget() {
           <Pressable style={StyleSheet.absoluteFill} onPress={onClosePress} testID="homeChatWidgetBackdrop" />
 
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
             style={styles.kbRoot}
           >
@@ -377,6 +360,7 @@ export default function HomeChatWidget() {
                     <Text style={styles.systemBannerText}>{publicBannerText}</Text>
                   </View>
                 ) : null}
+
                 {showLoading && messages.length === 0 ? (
                   <View style={styles.loading} testID="homeChatWidgetLoading">
                     <ActivityIndicator color={Colors.primary} />
@@ -401,7 +385,7 @@ export default function HomeChatWidget() {
                           disabled={isLoadingOlder}
                           style={({ pressed }) => [
                             styles.loadOlder,
-                            (pressed && !isLoadingOlder) ? { opacity: 0.92 } : null,
+                            pressed && !isLoadingOlder ? { opacity: 0.92 } : null,
                             isLoadingOlder ? { opacity: 0.6 } : null,
                           ]}
                           testID="homeChatWidgetLoadOlder"
@@ -433,7 +417,7 @@ export default function HomeChatWidget() {
                   disabled={!draft.trim() || !conversation?.id || !user}
                   style={({ pressed }) => [
                     styles.sendButton,
-                    (!draft.trim() || !conversation?.id) && styles.sendButtonDisabled,
+                    (!draft.trim() || !conversation?.id || !user) && styles.sendButtonDisabled,
                     pressed && styles.sendButtonPressed,
                   ]}
                   testID="homeChatWidgetSendButton"
@@ -456,9 +440,7 @@ export default function HomeChatWidget() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  root: { ...StyleSheet.absoluteFillObject },
   fab: {
     position: 'absolute',
     right: 16,
@@ -473,34 +455,23 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 10,
   },
-  fabPressed: {
-    transform: [{ scale: 0.98 }],
-  },
-  fabInner: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
-  },
-  kbRoot: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-  },
+  fabPressed: { transform: [{ scale: 0.98 }] },
+  fabInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  kbRoot: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12, paddingBottom: 12 },
+
+  // ✅ FIX: use height instead of maxHeight-only
   sheet: {
     width: '100%',
-    maxHeight: '82%',
+    height: '82%',
+    maxHeight: 720,
     borderRadius: 22,
     backgroundColor: Colors.card,
     borderWidth: 1,
     borderColor: Colors.border,
     overflow: 'hidden',
   },
+
   sheetHeader: {
     paddingHorizontal: 16,
     paddingTop: 14,
@@ -511,22 +482,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  headerLeft: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  sheetTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  sheetSubtitle: {
-    marginTop: 2,
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  headerLeft: { flex: 1, paddingRight: 12 },
+  sheetTitle: { color: Colors.text, fontSize: 18, fontWeight: '800', letterSpacing: 0.2 },
+  sheetSubtitle: { marginTop: 2, color: Colors.textSecondary, fontSize: 12, fontWeight: '600' },
   closeButton: {
     width: 36,
     height: 36,
@@ -535,6 +493,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  closeButtonPressed: { transform: [{ scale: 0.98 }], backgroundColor: 'rgba(255,255,255,0.09)' },
   realtimeBanner: {
     marginTop: 10,
     alignSelf: 'flex-start',
@@ -545,19 +504,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,140,0,0.34)',
   },
-  realtimeBannerPressed: {
-    transform: [{ scale: 0.99 }],
-  },
-  realtimeBannerText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontWeight: '800',
-    lineHeight: 16,
-  },
-  closeButtonPressed: {
-    transform: [{ scale: 0.98 }],
-    backgroundColor: 'rgba(255,255,255,0.09)',
-  },
+  realtimeBannerPressed: { transform: [{ scale: 0.99 }] },
+  realtimeBannerText: { color: Colors.text, fontSize: 12, fontWeight: '800', lineHeight: 16 },
   errorBox: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -565,17 +513,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  errorTitle: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  errorText: {
-    marginTop: 4,
-    color: Colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 16,
-  },
+  errorTitle: { color: Colors.text, fontSize: 13, fontWeight: '800' },
+  errorText: { marginTop: 4, color: Colors.textSecondary, fontSize: 12, lineHeight: 16 },
   retryButton: {
     alignSelf: 'flex-start',
     marginTop: 10,
@@ -586,18 +525,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(212,175,55,0.38)',
   },
-  retryButtonPressed: {
-    transform: [{ scale: 0.99 }],
-  },
-  retryText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  messagesWrap: {
-    flex: 1,
-    minHeight: 240,
-  },
+  retryButtonPressed: { transform: [{ scale: 0.99 }] },
+  retryText: { color: Colors.text, fontSize: 12, fontWeight: '800' },
+
+  messagesWrap: { flex: 1, minHeight: 240 },
   systemBanner: {
     marginHorizontal: 14,
     marginTop: 12,
@@ -609,29 +540,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(212,175,55,0.28)',
   },
-  systemBannerText: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 18,
-  },
-  loading: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 24,
-  },
-  loadingText: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  listContent: {
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    gap: 10,
-  },
+  systemBannerText: { color: Colors.text, fontSize: 13, fontWeight: '800', lineHeight: 18 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 24 },
+  loadingText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  listContent: { paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
   loadOlder: {
     alignSelf: 'center',
     marginBottom: 10,
@@ -642,60 +554,21 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  loadOlderText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  messageRow: {
-    flexDirection: 'row',
-  },
-  messageRowMine: {
-    justifyContent: 'flex-end',
-  },
-  messageRowTheirs: {
-    justifyContent: 'flex-start',
-  },
-  bubble: {
-    maxWidth: '86%',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-  },
-  bubbleMine: {
-    backgroundColor: 'rgba(212,175,55,0.22)',
-    borderColor: 'rgba(212,175,55,0.45)',
-  },
-  bubbleTheirs: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  messageText: {
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 19,
-  },
-  messageTextMine: {
-    color: Colors.text,
-  },
-  messageTextTheirs: {
-    color: Colors.text,
-  },
-  messageMeta: {
-    marginTop: 6,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  messageMetaMine: {
-    color: 'rgba(255,255,255,0.75)',
-    textAlign: 'right',
-  },
-  messageMetaTheirs: {
-    color: Colors.textSecondary,
-    textAlign: 'left',
-  },
+  loadOlderText: { color: Colors.text, fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
+
+  messageRow: { flexDirection: 'row' },
+  messageRowMine: { justifyContent: 'flex-end' },
+  messageRowTheirs: { justifyContent: 'flex-start' },
+  bubble: { maxWidth: '86%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1 },
+  bubbleMine: { backgroundColor: 'rgba(212,175,55,0.22)', borderColor: 'rgba(212,175,55,0.45)' },
+  bubbleTheirs: { backgroundColor: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.10)' },
+  messageText: { fontSize: 14, fontWeight: '600', lineHeight: 19 },
+  messageTextMine: { color: Colors.text },
+  messageTextTheirs: { color: Colors.text },
+  messageMeta: { marginTop: 6, fontSize: 11, fontWeight: '700' },
+  messageMetaMine: { color: 'rgba(255,255,255,0.75)', textAlign: 'right' },
+  messageMetaTheirs: { color: Colors.textSecondary, textAlign: 'left' },
+
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -716,13 +589,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: Platform.OS === 'web' ? 10 : 8,
   },
-  input: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-    maxHeight: 92,
-    padding: 0,
-  },
+  input: { color: Colors.text, fontSize: 14, fontWeight: '600', maxHeight: 92, padding: 0 },
   sendButton: {
     width: 44,
     height: 44,
@@ -731,12 +598,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendButtonDisabled: {
-    opacity: 0.45,
-  },
-  sendButtonPressed: {
-    transform: [{ scale: 0.98 }],
-  },
+  sendButtonDisabled: { opacity: 0.45 },
+  sendButtonPressed: { transform: [{ scale: 0.98 }] },
   toast: {
     position: 'absolute',
     left: 14,
@@ -747,10 +610,5 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
-  toastText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    textAlign: 'center',
-    fontWeight: '700',
-  },
+  toastText: { color: '#FFFFFF', fontSize: 14, textAlign: 'center', fontWeight: '700' },
 });
