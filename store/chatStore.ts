@@ -335,27 +335,46 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         const url = `${baseUrl.replace(/\/$/, '')}/functions/v1/chat-send-message`;
 
-        // Only require token for non-guest modes
-        let accessToken: string | null = null;
+        const headers: Record<string, string> = {
+          'content-type': 'application/json',
+        };
 
-        if (mode !== 'public_guest') {
+        if (mode === 'public_guest') {
+          let guestId: string | null = null;
+
+          try {
+            const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+            guestId = await AsyncStorage.getItem('chat_guest_id');
+            if (!guestId) {
+              try {
+                const Crypto = await import('expo-crypto');
+                const maybeUuid = (Crypto as unknown as { randomUUID?: () => string }).randomUUID;
+                guestId = typeof maybeUuid === 'function' ? maybeUuid() : null;
+              } catch {
+                guestId = null;
+              }
+
+              guestId = guestId ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+              await AsyncStorage.setItem('chat_guest_id', guestId);
+            }
+          } catch (e) {
+            console.warn('[chatStore] guestId storage unavailable, generating ephemeral guest id', safeErrorDetails(e));
+            guestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          }
+
+          headers['x-guest-id'] = guestId;
+        } else {
           const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
           if (sessionError) {
             console.error('[chatStore] auth.getSession error', safeErrorDetails(sessionError));
           }
 
-          accessToken = sessionData.session?.access_token ?? null;
+          const accessToken = sessionData.session?.access_token ?? null;
           if (!accessToken) {
             set({ error: 'not_authenticated' });
             return null;
           }
-        }
 
-        const headers: Record<string, string> = {
-          'content-type': 'application/json',
-        };
-
-        if (accessToken) {
           headers.authorization = `Bearer ${accessToken}`;
         }
 
