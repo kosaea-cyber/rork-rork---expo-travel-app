@@ -13,6 +13,29 @@ function getString(value: unknown): string | null {
   return null;
 }
 
+function stringify(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (value == null) return null;
+  try {
+    const s = JSON.stringify(value);
+    return typeof s === 'string' && s.trim().length > 0 ? s : null;
+  } catch {
+    return String(value);
+  }
+}
+
+function getNestedMessage(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  return (
+    getString(v.message) ??
+    getString(v.error_description) ??
+    getString(v.details) ??
+    getString(v.hint) ??
+    null
+  );
+}
+
 function getNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   return null;
@@ -26,7 +49,10 @@ export function normalizeSupabaseError(error: unknown): string {
   const message =
     getString(e.error_description) ??
     getString(e.message) ??
+    getNestedMessage(e.message) ??
+    getNestedMessage((e as unknown as { error?: unknown }).error) ??
     (typeof error === 'string' ? error : null) ??
+    stringify(error) ??
     'Something went wrong. Please try again.';
 
   const status = getNumber(e.status);

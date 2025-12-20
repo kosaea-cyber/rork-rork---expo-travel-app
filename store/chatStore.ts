@@ -436,7 +436,11 @@ export const useChatStore = create<ChatState>((set, get) => {
         return msg;
       } catch (e) {
         const details = safeErrorDetails(e);
-        console.error('[chatStore] sendMessage failed', details);
+        console.error('[chatStore] sendMessage failed', {
+          ...details,
+          normalized: normalizeSupabaseError(e),
+          raw: e,
+        });
         set({ error: normalizeSupabaseError(e) });
         return null;
       }
