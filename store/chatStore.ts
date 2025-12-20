@@ -338,90 +338,16 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    /**
-     * ✅ NEW:
-     * - Authed => direct Supabase query (as before)
-     * - Guest => Edge Function /chat-fetch-messages with x-guest-id
-     */
     fetchMessages: async (conversationId, limit, before) => {
       if (!conversationId) return [];
       set({ isLoading: true, error: null });
 
-      try {
-        const authed = await isAuthedSession();
-
-        // -------------------------
-        // AUTH: direct query
-        // -------------------------
-        if (authed) {
-          let q = supabase
-            .from('messages')
-            .select('id, conversation_id, sender_type, sender_id, body, created_at')
-            .eq('conversation_id', conversationId)
-            .order('created_at', { ascending: false })
-            .limit(limit);
-
-          if (before) q = q.lt('created_at', before);
-
-          const { data, error } = await q;
-          if (error) throw error;
-
-          const rows = (data ?? []) as MessageRow[];
-          const incoming = rows.map(mapMessageRow).reverse();
-
-          set((s) => {
-            const existing = s.messagesByConversationId[conversationId] ?? [];
-            const hasMore = rows.length >= limit;
-            return {
-              messagesByConversationId: {
-                ...s.messagesByConversationId,
-                [conversationId]: mergeMessages(existing, incoming),
-              },
-              hasMoreByConversationId: {
-                ...s.hasMoreByConversationId,
-                [conversationId]: hasMore,
-              },
-              isLoading: false,
-            };
-          });
-
-          return incoming;
-        }
-
-        // -------------------------
-        // GUEST: Edge fetch
-        // -------------------------
-        const base = getEdgeBase();
-        if (!base) throw new Error('Missing Supabase URL');
-
-        const guestId = await getGuestId();
-        const url = `${base}/functions/v1/chat-fetch-messages`;
-
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-guest-id': guestId,
-          },
-          body: JSON.stringify({ conversationId, limit, before: before ?? null }),
-        });
-
-        const json = (await res.json().catch(() => null)) as
-          | { data?: MessageRow[] | null; error?: unknown; hasMore?: boolean }
-          | null;
-
-        if (!res.ok) {
-          const msg = normalizeSupabaseError(json?.error ?? { status: res.status, message: json ?? res.statusText });
-          set({ isLoading: false, error: msg });
-          return [];
-        }
-
-        const rows = (json?.data ?? []) as MessageRow[];
-        const incoming = rows.map(mapMessageRow); // already expected oldest->newest in our edge
+      const applyRows = (rows: MessageRow[]) => {
+        const incoming = rows.map(mapMessageRow).reverse();
 
         set((s) => {
           const existing = s.messagesByConversationId[conversationId] ?? [];
-          const hasMore = typeof json?.hasMore === 'boolean' ? json.hasMore : rows.length >= limit;
+          const hasMore = rows.length >= limit;
           return {
             messagesByConversationId: {
               ...s.messagesByConversationId,
@@ -436,11 +362,94 @@ export const useChatStore = create<ChatState>((set, get) => {
         });
 
         return incoming;
+      };
+
+      const edgeFetch = async (directError: unknown): Promise<Message[]> => {
+        const base = getEdgeBase();
+        if (!base) {
+          const msg = normalizeSupabaseError(directError);
+          set({ isLoading: false, error: msg });
+          return [];
+        }
+
+        const token = await getAccessTokenOrNull();
+
+        const getJwtRole = (jwt: string): string | null => {
+          try {
+            const parts = jwt.split('.');
+            const payload = parts[1];
+            if (!payload) return null;
+            const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+            const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+            const json = (globalThis as unknown as { atob?: (s: string) => string }).atob?.(padded);
+            const parsed = json ? (JSON.parse(json) as Record<string, unknown>) : null;
+            const role = parsed?.role;
+            return typeof role === 'string' && role.trim() ? role : null;
+          } catch {
+            return null;
+          }
+        };
+
+        const conv = get().conversations.find((c) => c.id === conversationId) ?? null;
+        const isPrivate = conv?.type === 'private';
+        const jwtRole = token ? getJwtRole(token) : null;
+
+        const mode: SendMode = !token ? 'public_guest' : jwtRole === 'admin' ? 'admin' : isPrivate ? 'private_user' : 'public_auth';
+
+        const url = `${base}/functions/v1/chat-fetch-messages`;
+
+        const headers: Record<string, string> = { 'content-type': 'application/json' };
+        if (token) {
+          headers.authorization = `Bearer ${token}`;
+        } else {
+          const guestId = await getGuestId();
+          headers['x-guest-id'] = guestId;
+        }
+
+        console.warn('[chatStore] fetchMessages direct select failed; using edge fallback', {
+          conversationId,
+          mode,
+          before: before ?? null,
+          directError: safeErrorDetails(directError),
+        });
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ conversationId, limit, before: before ?? null, mode }),
+        });
+
+        const json = (await res.json().catch(() => null)) as { data?: MessageRow[] | null; error?: unknown } | null;
+
+        if (!res.ok) {
+          const msg = normalizeSupabaseError(json?.error ?? { status: res.status, message: json ?? res.statusText });
+          set({ isLoading: false, error: msg });
+          return [];
+        }
+
+        const rows = (json?.data ?? []) as MessageRow[];
+        return applyRows(rows);
+      };
+
+      try {
+        let q = supabase
+          .from('messages')
+          .select('id, conversation_id, sender_type, sender_id, body, created_at')
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: false })
+          .limit(limit);
+
+        if (before) q = q.lt('created_at', before);
+
+        const { data, error } = await q;
+        if (error) {
+          return await edgeFetch(error);
+        }
+
+        const rows = (data ?? []) as MessageRow[];
+        return applyRows(rows);
       } catch (e) {
-        const msg = normalizeSupabaseError(e);
-        console.error('[chatStore] fetchMessages failed', safeErrorDetails(e));
-        set({ isLoading: false, error: msg });
-        return [];
+        return await edgeFetch(e);
       }
     },
 
