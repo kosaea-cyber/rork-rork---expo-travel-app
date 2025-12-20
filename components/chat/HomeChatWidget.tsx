@@ -17,6 +17,7 @@ import { MessageCircle, Send, X } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
+import { supabase } from '@/lib/supabase/client';
 import { useAuthStore } from '@/store/authStore';
 import type { Conversation, Message } from '@/store/chatStore';
 import { useChatStore } from '@/store/chatStore';
@@ -54,6 +55,7 @@ export default function HomeChatWidget() {
     realtimeHealthByConversationId,
     realtimeErrorByConversationId,
     getPublicConversation,
+    getOrCreatePrivateConversation,
     fetchMessages,
     subscribeToConversation,
     sendMessage,
@@ -114,7 +116,26 @@ export default function HomeChatWidget() {
     try {
       console.log('[HomeChatWidget] bootstrap');
 
-      const conv = await getPublicConversation();
+      let conv: Conversation | null = null;
+
+      if (!user) {
+        console.log('[HomeChatWidget] guest open -> signInAnonymously');
+
+        const { data: sessionData } = await supabase.auth.getSession();
+        const hasSession = Boolean(sessionData.session);
+
+        if (!hasSession) {
+          const { error: anonErr } = await supabase.auth.signInAnonymously();
+          if (anonErr) {
+            console.error('[HomeChatWidget] signInAnonymously failed', anonErr);
+            throw anonErr;
+          }
+        }
+
+        conv = await getOrCreatePrivateConversation();
+      } else {
+        conv = await getPublicConversation();
+      }
       if (!conv) {
         const storeErrUnknown: unknown = useChatStore.getState().error;
         const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
@@ -147,7 +168,7 @@ export default function HomeChatWidget() {
       );
       setIsBootstrapping(false);
     }
-  }, [fetchMessages, getPublicConversation, markConversationReadForUser]);
+  }, [fetchMessages, getOrCreatePrivateConversation, getPublicConversation, markConversationReadForUser, user]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -220,7 +241,11 @@ export default function HomeChatWidget() {
     const trimmed = draft.trim();
     if (!trimmed) return;
 
-    const mode = user ? 'public_auth' : 'public_guest';
+    let mode: 'public_auth' | 'public_guest' | 'private_user' = user ? 'public_auth' : 'public_guest';
+
+    if (!user && conversation?.type === 'private') {
+      mode = 'private_user';
+    }
 
     const now = Date.now();
     if (now - lastSendAtRef.current < 3000) {
@@ -237,7 +262,7 @@ export default function HomeChatWidget() {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
     }
-  }, [conversation?.id, draft, sendMessage, showToast, user]);
+  }, [conversation?.id, conversation?.type, draft, sendMessage, showToast, user]);
 
   const effectiveError = localError ?? error;
   const showLoading = isBootstrapping || isLoading;
