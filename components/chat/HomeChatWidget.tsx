@@ -241,11 +241,7 @@ export default function HomeChatWidget() {
     const trimmed = draft.trim();
     if (!trimmed) return;
 
-    let mode: 'public_auth' | 'public_guest' | 'private_user' = user ? 'public_auth' : 'public_guest';
-
-    if (!user && conversation?.type === 'private') {
-      mode = 'private_user';
-    }
+    const mode: 'public_auth' | 'public_guest' | 'private_user' = user ? 'public_auth' : 'private_user';
 
     const now = Date.now();
     if (now - lastSendAtRef.current < 3000) {
@@ -262,7 +258,7 @@ export default function HomeChatWidget() {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
     }
-  }, [conversation?.id, conversation?.type, draft, sendMessage, showToast, user]);
+  }, [conversation?.id, draft, sendMessage, showToast, user]);
 
   const effectiveError = localError ?? error;
   const showLoading = isBootstrapping || isLoading;
