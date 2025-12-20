@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase/client';
 
-export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed';
+export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 
 export type BookingRow = {
   id: string;
@@ -60,8 +60,8 @@ interface BookingState {
   fetchMyBookings: () => Promise<void>;
   createBooking: (payload: CreateBookingPayload) => Promise<BookingRow | null>;
 
-  adminFetchAllBookings: () => Promise<void>;
-  updateBookingStatus: (id: string, status: BookingStatus) => Promise<BookingRow | null>;
+  fetchAllBookingsForAdmin: () => Promise<void>;
+  updateBookingStatusAdmin: (bookingId: string, nextStatus: BookingStatus) => Promise<BookingRow | null>;
 }
 
 export const useBookingStore = create<BookingState>((set, get) => ({
@@ -80,6 +80,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
         .from('bookings')
         .select('id, user_id, status, notes, created_at, updated_at')
         .eq('user_id', userId)
+        .in('status', ['pending', 'confirmed', 'cancelled'])
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -127,59 +128,60 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     }
   },
 
-  adminFetchAllBookings: async () => {
+  fetchAllBookingsForAdmin: async () => {
     set({ isLoading: true, error: null });
     try {
       await assertAdmin();
-      console.log('[bookingStore] adminFetchAllBookings');
+      console.log('[bookingStore] fetchAllBookingsForAdmin');
 
       const { data, error } = await supabase
         .from('bookings')
         .select('id, user_id, status, notes, created_at, updated_at')
+        .in('status', ['pending', 'confirmed', 'cancelled'])
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('[bookingStore] adminFetchAllBookings select error', error.message);
+        console.error('[bookingStore] fetchAllBookingsForAdmin select error', error.message);
         throw new Error(error.message);
       }
 
       set({ adminBookings: (data ?? []) as BookingRow[], isLoading: false });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
-      console.error('[bookingStore] adminFetchAllBookings failed', message);
+      console.error('[bookingStore] fetchAllBookingsForAdmin failed', message);
       set({ isLoading: false, error: { message } });
     }
   },
 
-  updateBookingStatus: async (id, status) => {
+  updateBookingStatusAdmin: async (bookingId, nextStatus) => {
     set({ isLoading: true, error: null });
     try {
       await assertAdmin();
-      console.log('[bookingStore] updateBookingStatus', { id, status });
+      console.log('[bookingStore] updateBookingStatusAdmin', { bookingId, nextStatus });
 
       const { data, error } = await supabase
         .from('bookings')
-        .update({ status })
-        .eq('id', id)
+        .update({ status: nextStatus })
+        .eq('id', bookingId)
         .select('id, user_id, status, notes, created_at, updated_at')
         .single();
 
       if (error) {
-        console.error('[bookingStore] updateBookingStatus update error', error.message);
+        console.error('[bookingStore] updateBookingStatusAdmin update error', error.message);
         throw new Error(error.message);
       }
 
       const updated = data as BookingRow;
       set({
         isLoading: false,
-        adminBookings: get().adminBookings.map((b) => (b.id === id ? updated : b)),
-        myBookings: get().myBookings.map((b) => (b.id === id ? updated : b)),
+        adminBookings: get().adminBookings.map((b) => (b.id === bookingId ? updated : b)),
+        myBookings: get().myBookings.map((b) => (b.id === bookingId ? updated : b)),
       });
 
       return updated;
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
-      console.error('[bookingStore] updateBookingStatus failed', message);
+      console.error('[bookingStore] updateBookingStatusAdmin failed', message);
       set({ isLoading: false, error: { message } });
       return null;
     }

@@ -11,11 +11,11 @@ export default function BookingsPage() {
   const adminBookings = useBookingStore((s) => s.adminBookings);
   const isLoading = useBookingStore((s) => s.isLoading);
   const error = useBookingStore((s) => s.error);
-  const adminFetchAllBookings = useBookingStore((s) => s.adminFetchAllBookings);
+  const fetchAllBookingsForAdmin = useBookingStore((s) => s.fetchAllBookingsForAdmin);
 
   useEffect(() => {
-    adminFetchAllBookings();
-  }, [adminFetchAllBookings]);
+    fetchAllBookingsForAdmin();
+  }, [fetchAllBookingsForAdmin]);
 
   const filtered = useMemo(() => {
     return adminBookings.filter((b) => (filter === 'all' ? true : b.status === filter));
@@ -73,7 +73,7 @@ export default function BookingsPage() {
         <View style={styles.empty} testID="adminBookingsError">
           <Text style={styles.emptyText}>Failed to load bookings.</Text>
           <Text style={[styles.emptyText, { marginTop: 6, fontSize: 12 }]}>{error.message}</Text>
-          <TouchableOpacity style={[styles.tab, { marginTop: 16 }]} onPress={() => adminFetchAllBookings()} testID="adminBookingsRetry">
+          <TouchableOpacity style={[styles.tab, { marginTop: 16 }]} onPress={() => fetchAllBookingsForAdmin()} testID="adminBookingsRetry">
             <Text style={styles.tabText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -84,7 +84,7 @@ export default function BookingsPage() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           refreshControl={
-            <RefreshControl refreshing={isLoading} onRefresh={() => adminFetchAllBookings()} tintColor={Colors.tint} />
+            <RefreshControl refreshing={isLoading} onRefresh={() => fetchAllBookingsForAdmin()} tintColor={Colors.tint} />
           }
           ListEmptyComponent={
             <View style={styles.empty} testID="adminBookingsEmpty">

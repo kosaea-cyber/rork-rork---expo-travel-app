@@ -48,8 +48,6 @@ export default function BookingsScreen() {
         return Colors.success;
       case 'cancelled':
         return Colors.error;
-      case 'completed':
-        return Colors.textSecondary;
       default:
         return '#FFA000';
     }

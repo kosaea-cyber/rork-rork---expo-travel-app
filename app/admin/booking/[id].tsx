@@ -10,7 +10,7 @@ export default function BookingDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  const updateBookingStatus = useBookingStore((s) => s.updateBookingStatus);
+  const updateBookingStatusAdmin = useBookingStore((s) => s.updateBookingStatusAdmin);
 
   const [booking, setBooking] = useState<BookingRow | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -66,14 +66,14 @@ export default function BookingDetail() {
           text: 'Update',
           style: 'destructive',
           onPress: async () => {
-            const updated = await updateBookingStatus(booking.id, status);
+            const updated = await updateBookingStatusAdmin(booking.id, status);
             if (!updated) return;
             setBooking(updated);
           },
         },
       ]);
     },
-    [booking, updateBookingStatus],
+    [booking, updateBookingStatusAdmin],
   );
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.tint} /></View>;
@@ -136,7 +136,7 @@ export default function BookingDetail() {
               ) : null}
 
               {canComplete ? (
-                <TouchableOpacity style={[styles.btn, styles.btnComplete]} onPress={() => updateStatus('completed')} testID="adminBookingComplete">
+                <TouchableOpacity style={[styles.btn, styles.btnConfirm]} onPress={() => updateStatus('confirmed')} testID="adminBookingConfirm2">
                   <CheckCircle size={16} color="white" />
                   <Text style={styles.btnText}>Complete</Text>
                 </TouchableOpacity>
