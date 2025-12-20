@@ -143,7 +143,7 @@ export default function HomeChatWidget() {
         setLocalError(
           storeErr && storeErr.trim().length > 0
             ? storeErr
-            : 'Public chat is not configured yet. Please contact support.'
+            : 'Chat is not configured yet. Please contact support.'
         );
 
         setIsBootstrapping(false);
@@ -333,6 +333,11 @@ export default function HomeChatWidget() {
                   </Text>
                   <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestLabel">
                     {user ? 'Signed in' : 'Guest'}
+                    {!user ? (
+                      <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestAnonNote">
+                        Anonymous session
+                      </Text>
+                    ) : null}
                   </Text>
 
                   {realtimeHealth === 'error' ? (
