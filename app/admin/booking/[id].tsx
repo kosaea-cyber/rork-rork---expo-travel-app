@@ -19,27 +19,12 @@ type ProfileLite = { id: string; full_name?: string | null; name?: string | null
 
 type Snack = { type: 'success' | 'error'; message: string } | null;
 
-/**
- * NOTES format (examples):
- * - Package: Skin Glow Treatment (uuid)
- * - Preferred start date: 2025-12-01
- * - Preferred date range: 2025-12-01 - 2025-12-10
- * - Preferred dates: 2025-12-01 → 2025-12-10
- * - Travelers: 2
- */
-
 function extractPackageLine(notes: string | null): { title: string | null; packageId: string | null } {
   if (!notes) return { title: null, packageId: null };
-
-  // Package: Some Title (uuid)
   const m = notes.match(/^\s*Package:\s*(.+?)\s*\(([^)]+)\)\s*$/im);
   const title = (m?.[1] ?? '').trim();
   const packageId = (m?.[2] ?? '').trim();
-
-  return {
-    title: title || null,
-    packageId: packageId || null,
-  };
+  return { title: title || null, packageId: packageId || null };
 }
 
 function extractTravelers(notes: string | null): number | null {
@@ -52,7 +37,7 @@ function extractTravelers(notes: string | null): number | null {
 function extractPreferredDates(notes: string | null): { from: string | null; to: string | null; label: string | null } {
   if (!notes) return { from: null, to: null, label: null };
 
-  // 1) Preferred date range: A - B
+  // Preferred date range: A - B  |  Preferred dates: A → B
   let m = notes.match(/^\s*Preferred\s*(?:date\s*range|dates)\s*:\s*(.+?)\s*(?:-|–|—|->|→)\s*(.+?)\s*$/im);
   if (m?.[1] && m?.[2]) {
     const from = m[1].trim();
@@ -60,7 +45,7 @@ function extractPreferredDates(notes: string | null): { from: string | null; to:
     if (from && to) return { from, to, label: `${from} → ${to}` };
   }
 
-  // 2) Preferred start date: A
+  // Preferred start date: A
   m = notes.match(/^\s*Preferred\s*start\s*date:\s*(.+?)\s*$/im);
   if (m?.[1]) {
     const from = m[1].trim();
@@ -77,6 +62,13 @@ function formatCustomerLabel(p: ProfileLite | null, userId: string): string {
   if (name) return name;
   if (email) return email;
   return userId;
+}
+
+function buildPackageLabel(info: { title: string | null; packageId: string | null }): string | null {
+  if (info.title && info.packageId) return `${info.title} (${info.packageId})`;
+  if (info.title) return info.title;
+  if (info.packageId) return info.packageId;
+  return null;
 }
 
 export default function BookingDetail() {
@@ -123,17 +115,13 @@ export default function BookingDetail() {
     setError(null);
 
     try {
-      console.log('[admin/booking] load booking', { id });
       const { data, error: bookingError } = await supabase
         .from('bookings')
         .select('id, user_id, status, notes, created_at, updated_at')
         .eq('id', id)
         .maybeSingle();
 
-      if (bookingError) {
-        console.error('[admin/booking] select error', bookingError.message);
-        throw new Error(bookingError.message);
-      }
+      if (bookingError) throw new Error(bookingError.message);
 
       if (!data) {
         setBooking(null);
@@ -151,12 +139,8 @@ export default function BookingDetail() {
         .eq('id', row.user_id)
         .maybeSingle();
 
-      if (profileError) {
-        console.log('[admin/booking] profile load failed', profileError.message);
-        setProfile(null);
-      } else {
-        setProfile((profileData as ProfileLite | null) ?? null);
-      }
+      if (profileError) setProfile(null);
+      else setProfile((profileData as ProfileLite | null) ?? null);
 
       setLoading(false);
     } catch (e) {
@@ -205,7 +189,15 @@ export default function BookingDetail() {
     [booking, fetchAllBookingsForAdmin, showSnack, updateBookingStatusAdmin],
   );
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.tint} /></View>;
+  // ✅ returns AFTER all hooks
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={Colors.tint} />
+      </View>
+    );
+  }
+
   if (error) {
     return (
       <View style={styles.center} testID="adminBookingError">
@@ -217,22 +209,24 @@ export default function BookingDetail() {
       </View>
     );
   }
-  if (!booking) return <View style={styles.center}><Text style={{ color: Colors.text }}>Booking not found</Text></View>;
 
+  if (!booking) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ color: Colors.text }}>Booking not found</Text>
+      </View>
+    );
+  }
+
+  // ✅ derived values (NO hooks here)
   const statusColor = booking.status === 'confirmed' ? '#16A34A' : booking.status === 'cancelled' ? '#DC2626' : '#F59E0B';
-
   const customer = formatCustomerLabel(profile, booking.user_id);
 
   const pkgInfo = extractPackageLine(booking.notes);
+  const packageLabel = buildPackageLabel(pkgInfo);
+
   const travelers = extractTravelers(booking.notes);
   const preferredDates = extractPreferredDates(booking.notes);
-
-  const packageLabel = useMemo(() => {
-    if (pkgInfo.title && pkgInfo.packageId) return `${pkgInfo.title} (${pkgInfo.packageId})`;
-    if (pkgInfo.title) return pkgInfo.title;
-    if (pkgInfo.packageId) return pkgInfo.packageId;
-    return null;
-  }, [pkgInfo.packageId, pkgInfo.title]);
 
   return (
     <View style={styles.container}>
@@ -286,7 +280,6 @@ export default function BookingDetail() {
               </View>
             </View>
 
-            {/* ✅ NEW: Package */}
             <View style={styles.kvRow}>
               <Text style={styles.kLabel}>Package</Text>
               <View style={styles.customerInline}>
@@ -297,7 +290,6 @@ export default function BookingDetail() {
               </View>
             </View>
 
-            {/* ✅ NEW: Travelers */}
             <View style={styles.kvRow}>
               <Text style={styles.kLabel}>Travelers</Text>
               <View style={styles.customerInline}>
@@ -308,7 +300,6 @@ export default function BookingDetail() {
               </View>
             </View>
 
-            {/* ✅ Improved: Date/Time (supports range) */}
             <View style={styles.kvRow}>
               <Text style={styles.kLabel}>Date/Time</Text>
               <Text style={styles.kValue} numberOfLines={1}>
@@ -382,22 +373,10 @@ export default function BookingDetail() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 90,
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: 90 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   header: {
     backgroundColor: Colors.tint,
     padding: 20,
@@ -406,25 +385,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
   },
-  backButton: {
-    marginRight: 6,
-  },
-  headerTitle: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: -0.2,
-  },
-  headerSubtitle: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  content: {
-    padding: 16,
-    gap: 16,
-  },
+  backButton: { marginRight: 6 },
+  headerTitle: { color: 'white', fontSize: 18, fontWeight: '900', letterSpacing: -0.2 },
+  headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '700', marginTop: 2 },
+  content: { padding: 16, gap: 16 },
   card: {
     backgroundColor: 'white',
     borderRadius: 14,
@@ -461,74 +425,18 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  kValue: {
-    flex: 1,
-    color: Colors.text,
-    fontWeight: '800',
-    fontSize: 13,
-    textAlign: 'right',
-  },
-  kValueMono: {
-    flex: 1,
-    color: Colors.text,
-    fontWeight: '800',
-    fontSize: 12,
-    textAlign: 'right',
-  },
-  customerInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 6,
-    flex: 1,
-  },
-  statusPill: {
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    alignSelf: 'flex-end',
-  },
-  statusText: {
-    fontWeight: '900',
-    fontSize: 11,
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-  },
-  notesText: {
-    color: Colors.text,
-    fontWeight: '600',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  actionBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  actionConfirm: {
-    backgroundColor: '#16A34A',
-  },
-  actionCancel: {
-    backgroundColor: '#DC2626',
-  },
-  actionDisabled: {
-    opacity: 0.45,
-  },
-  actionText: {
-    color: 'white',
-    fontWeight: '900',
-    fontSize: 13,
-    letterSpacing: 0.2,
-  },
+  kValue: { flex: 1, color: Colors.text, fontWeight: '800', fontSize: 13, textAlign: 'right' },
+  kValueMono: { flex: 1, color: Colors.text, fontWeight: '800', fontSize: 12, textAlign: 'right' },
+  customerInline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, flex: 1 },
+  statusPill: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, alignSelf: 'flex-end' },
+  statusText: { fontWeight: '900', fontSize: 11, letterSpacing: 0.3, textTransform: 'uppercase' },
+  notesText: { color: Colors.text, fontWeight: '600', fontSize: 13, lineHeight: 18 },
+  actions: { flexDirection: 'row', gap: 10 },
+  actionBtn: { flex: 1, height: 48, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  actionConfirm: { backgroundColor: '#16A34A' },
+  actionCancel: { backgroundColor: '#DC2626' },
+  actionDisabled: { opacity: 0.45 },
+  actionText: { color: 'white', fontWeight: '900', fontSize: 13, letterSpacing: 0.2 },
   snack: {
     position: 'absolute',
     left: 14,
@@ -541,11 +449,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
-  snackText: {
-    color: 'white',
-    fontWeight: '800',
-    fontSize: 13,
-  },
+  snackText: { color: 'white', fontWeight: '800', fontSize: 13 },
   retryBtn: {
     height: 46,
     borderRadius: 12,
@@ -556,9 +460,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  retryBtnText: {
-    color: Colors.text,
-    fontWeight: '900',
-    fontSize: 13,
-  },
+  retryBtnText: { color: Colors.text, fontWeight: '900', fontSize: 13 },
 });
