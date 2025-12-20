@@ -10,50 +10,17 @@ import {
   Animated,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, CheckCircle2, UserRound, XCircle, Package as PackageIcon, Users } from 'lucide-react-native';
+import { ArrowLeft, CheckCircle2, UserRound, XCircle, Package as PackageIcon, Users, Calendar } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 import { type BookingRow, type BookingStatus, useBookingStore } from '@/store/bookingStore';
+import { useI18nStore } from '@/constants/i18n';
 
 type ProfileLite = { id: string; full_name?: string | null; name?: string | null; email?: string | null };
 
+type PackageLite = { id: string; title_en?: string | null; title_ar?: string | null; title_de?: string | null };
+
 type Snack = { type: 'success' | 'error'; message: string } | null;
-
-function extractPackageLine(notes: string | null): { title: string | null; packageId: string | null } {
-  if (!notes) return { title: null, packageId: null };
-  const m = notes.match(/^\s*Package:\s*(.+?)\s*\(([^)]+)\)\s*$/im);
-  const title = (m?.[1] ?? '').trim();
-  const packageId = (m?.[2] ?? '').trim();
-  return { title: title || null, packageId: packageId || null };
-}
-
-function extractTravelers(notes: string | null): number | null {
-  if (!notes) return null;
-  const m = notes.match(/^\s*Travelers:\s*(\d+)\s*$/im);
-  const n = m?.[1] ? parseInt(m[1], 10) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-function extractPreferredDates(notes: string | null): { from: string | null; to: string | null; label: string | null } {
-  if (!notes) return { from: null, to: null, label: null };
-
-  // Preferred date range: A - B  |  Preferred dates: A → B
-  let m = notes.match(/^\s*Preferred\s*(?:date\s*range|dates)\s*:\s*(.+?)\s*(?:-|–|—|->|→)\s*(.+?)\s*$/im);
-  if (m?.[1] && m?.[2]) {
-    const from = m[1].trim();
-    const to = m[2].trim();
-    if (from && to) return { from, to, label: `${from} → ${to}` };
-  }
-
-  // Preferred start date: A
-  m = notes.match(/^\s*Preferred\s*start\s*date:\s*(.+?)\s*$/im);
-  if (m?.[1]) {
-    const from = m[1].trim();
-    if (from) return { from, to: null, label: from };
-  }
-
-  return { from: null, to: null, label: null };
-}
 
 function formatCustomerLabel(p: ProfileLite | null, userId: string): string {
   const name = (p?.full_name ?? p?.name ?? '').trim();
@@ -64,22 +31,35 @@ function formatCustomerLabel(p: ProfileLite | null, userId: string): string {
   return userId;
 }
 
-function buildPackageLabel(info: { title: string | null; packageId: string | null }): string | null {
-  if (info.title && info.packageId) return `${info.title} (${info.packageId})`;
-  if (info.title) return info.title;
-  if (info.packageId) return info.packageId;
-  return null;
+function formatDateRange(start: string | null | undefined, end: string | null | undefined): string {
+  const s = (start ?? '').trim();
+  const e = (end ?? '').trim();
+  if (!s && !e) return '—';
+  const startSafe = s || e;
+  const endSafe = e || s;
+  if (!startSafe) return '—';
+  if (!endSafe) return startSafe;
+  return `${startSafe} → ${endSafe}`;
+}
+
+function getPackageTitle(pkg: PackageLite | null, lang: 'en' | 'ar' | 'de'): string {
+  const localizedRaw = (lang === 'ar' ? pkg?.title_ar : lang === 'de' ? pkg?.title_de : pkg?.title_en) ?? '';
+  const localized = localizedRaw.trim();
+  const fallback = (pkg?.title_en ?? '').trim();
+  return localized || fallback;
 }
 
 export default function BookingDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const language = useI18nStore((s) => s.language);
 
   const updateBookingStatusAdmin = useBookingStore((s) => s.updateBookingStatusAdmin);
   const fetchAllBookingsForAdmin = useBookingStore((s) => s.fetchAllBookingsForAdmin);
 
   const [booking, setBooking] = useState<BookingRow | null>(null);
   const [profile, setProfile] = useState<ProfileLite | null>(null);
+  const [pkg, setPkg] = useState<PackageLite | null>(null);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [actionLoading, setActionLoading] = useState<boolean>(false);
@@ -87,6 +67,41 @@ export default function BookingDetail() {
 
   const [snack, setSnack] = useState<Snack>(null);
   const snackAnim = useRef<Animated.Value>(new Animated.Value(0)).current;
+
+  const canUpdate = useMemo(() => booking?.status === 'pending', [booking?.status]);
+
+  const statusColor = useMemo(() => {
+    if (booking?.status === 'confirmed') return '#16A34A';
+    if (booking?.status === 'cancelled') return '#DC2626';
+    return '#F59E0B';
+  }, [booking?.status]);
+
+  const customerLabel = useMemo(() => {
+    return booking ? formatCustomerLabel(profile, booking.user_id) : '';
+  }, [booking, profile]);
+
+  const packageTitle = useMemo(() => {
+    if (!booking?.package_id) return '—';
+    const t = getPackageTitle(pkg, language);
+    return t.trim() ? t : booking.package_id;
+  }, [booking?.package_id, language, pkg]);
+
+  const dateRange = useMemo(() => {
+    return formatDateRange(booking?.preferred_start_date ?? null, booking?.preferred_end_date ?? null);
+  }, [booking?.preferred_start_date, booking?.preferred_end_date]);
+
+  const createdLabel = useMemo(() => {
+    const raw = booking?.created_at ?? null;
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString();
+  }, [booking?.created_at]);
+
+  const notesLabel = useMemo(() => {
+    const v = (booking?.customer_notes ?? '').trim();
+    return v ? v : '—';
+  }, [booking?.customer_notes]);
 
   const showSnack = useCallback(
     (next: Snack) => {
@@ -110,22 +125,42 @@ export default function BookingDetail() {
   );
 
   const loadData = useCallback(async () => {
-    if (!id) return;
+    const bookingId = typeof id === 'string' ? id.trim() : '';
+    if (!bookingId) {
+      console.log('[admin/bookingDetail] missing route param id');
+      setBooking(null);
+      setProfile(null);
+      setPkg(null);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
     try {
+      console.log('[admin/bookingDetail] load booking', { bookingId });
+
+      const bookingSelect =
+        'id, user_id, status, notes, package_id, preferred_start_date, preferred_end_date, travelers, customer_notes, created_at, updated_at';
+
       const { data, error: bookingError } = await supabase
         .from('bookings')
-        .select('id, user_id, status, notes, created_at, updated_at')
-        .eq('id', id)
+        .select(bookingSelect)
+        .eq('id', bookingId)
         .maybeSingle();
+
+      console.log('[admin/bookingDetail] booking query result', {
+        hasRow: Boolean(data),
+        error: bookingError?.message ?? null,
+      });
 
       if (bookingError) throw new Error(bookingError.message);
 
       if (!data) {
         setBooking(null);
         setProfile(null);
+        setPkg(null);
         setLoading(false);
         return;
       }
@@ -133,18 +168,33 @@ export default function BookingDetail() {
       const row = data as BookingRow;
       setBooking(row);
 
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, full_name, name, email')
-        .eq('id', row.user_id)
-        .maybeSingle();
+      const [profileRes, packageRes] = await Promise.all([
+        supabase.from('profiles').select('id, full_name, name, email').eq('id', row.user_id).maybeSingle(),
+        row.package_id
+          ? supabase.from('packages').select('id, title_en, title_ar, title_de').eq('id', row.package_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null } as { data: null; error: null }),
+      ]);
 
-      if (profileError) setProfile(null);
-      else setProfile((profileData as ProfileLite | null) ?? null);
+      console.log('[admin/bookingDetail] profile/package results', {
+        profileError: profileRes.error?.message ?? null,
+        hasProfile: Boolean(profileRes.data),
+        packageError: (packageRes as any)?.error?.message ?? null,
+        hasPackage: Boolean((packageRes as any)?.data),
+      });
+
+      if (profileRes.error) setProfile(null);
+      else setProfile((profileRes.data as ProfileLite | null) ?? null);
+
+      const pkgData = (packageRes as { data: unknown; error: { message?: string } | null }).data;
+      const pkgErr = (packageRes as { data: unknown; error: { message?: string } | null }).error;
+
+      if (pkgErr) setPkg(null);
+      else setPkg((pkgData as PackageLite | null) ?? null);
 
       setLoading(false);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
+      console.log('[admin/bookingDetail] load error', message);
       setError(message);
       setLoading(false);
     }
@@ -153,8 +203,6 @@ export default function BookingDetail() {
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  const canUpdate = useMemo(() => booking?.status === 'pending', [booking?.status]);
 
   const updateStatus = useCallback(
     async (status: BookingStatus) => {
@@ -189,10 +237,9 @@ export default function BookingDetail() {
     [booking, fetchAllBookingsForAdmin, showSnack, updateBookingStatusAdmin],
   );
 
-  // ✅ returns AFTER all hooks
   if (loading) {
     return (
-      <View style={styles.center}>
+      <View style={styles.center} testID="adminBookingLoading">
         <ActivityIndicator color={Colors.tint} />
       </View>
     );
@@ -212,21 +259,11 @@ export default function BookingDetail() {
 
   if (!booking) {
     return (
-      <View style={styles.center}>
+      <View style={styles.center} testID="adminBookingNotFound">
         <Text style={{ color: Colors.text }}>Booking not found</Text>
       </View>
     );
   }
-
-  // ✅ derived values (NO hooks here)
-  const statusColor = booking.status === 'confirmed' ? '#16A34A' : booking.status === 'cancelled' ? '#DC2626' : '#F59E0B';
-  const customer = formatCustomerLabel(profile, booking.user_id);
-
-  const pkgInfo = extractPackageLine(booking.notes);
-  const packageLabel = buildPackageLabel(pkgInfo);
-
-  const travelers = extractTravelers(booking.notes);
-  const preferredDates = extractPreferredDates(booking.notes);
 
   return (
     <View style={styles.container}>
@@ -258,10 +295,10 @@ export default function BookingDetail() {
 
             <View style={styles.kvRow}>
               <Text style={styles.kLabel}>Customer</Text>
-              <View style={styles.customerInline}>
+              <View style={styles.inlineRight}>
                 <UserRound size={14} color={Colors.textSecondary} />
                 <Text style={styles.kValue} numberOfLines={1}>
-                  {customer}
+                  {customerLabel}
                 </Text>
               </View>
             </View>
@@ -269,7 +306,7 @@ export default function BookingDetail() {
             <View style={styles.kvRow}>
               <Text style={styles.kLabel}>Created</Text>
               <Text style={styles.kValue} numberOfLines={1}>
-                {new Date(booking.created_at).toLocaleString()}
+                {createdLabel}
               </Text>
             </View>
 
@@ -282,35 +319,40 @@ export default function BookingDetail() {
 
             <View style={styles.kvRow}>
               <Text style={styles.kLabel}>Package</Text>
-              <View style={styles.customerInline}>
+              <View style={styles.inlineRight}>
                 <PackageIcon size={14} color={Colors.textSecondary} />
                 <Text style={styles.kValue} numberOfLines={1}>
-                  {packageLabel ?? '—'}
+                  {packageTitle}
                 </Text>
               </View>
             </View>
 
             <View style={styles.kvRow}>
               <Text style={styles.kLabel}>Travelers</Text>
-              <View style={styles.customerInline}>
+              <View style={styles.inlineRight}>
                 <Users size={14} color={Colors.textSecondary} />
                 <Text style={styles.kValue} numberOfLines={1}>
-                  {travelers ? String(travelers) : '—'}
+                  {String(booking.travelers ?? 1)}
                 </Text>
               </View>
             </View>
 
             <View style={styles.kvRow}>
-              <Text style={styles.kLabel}>Date/Time</Text>
-              <Text style={styles.kValue} numberOfLines={1}>
-                {preferredDates.label ?? '—'}
-              </Text>
+              <Text style={styles.kLabel}>Date range</Text>
+              <View style={styles.inlineRight}>
+                <Calendar size={14} color={Colors.textSecondary} />
+                <Text style={styles.kValue} numberOfLines={1}>
+                  {dateRange}
+                </Text>
+              </View>
             </View>
           </View>
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Notes</Text>
-            <Text style={styles.notesText}>{(booking.notes ?? '').trim() ? booking.notes : '—'}</Text>
+            <Text style={styles.notesText} testID="adminBookingCustomerNotes">
+              {notesLabel}
+            </Text>
           </View>
 
           <View style={styles.card}>
@@ -427,12 +469,20 @@ const styles = StyleSheet.create({
   },
   kValue: { flex: 1, color: Colors.text, fontWeight: '800', fontSize: 13, textAlign: 'right' },
   kValueMono: { flex: 1, color: Colors.text, fontWeight: '800', fontSize: 12, textAlign: 'right' },
-  customerInline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, flex: 1 },
+  inlineRight: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, flex: 1 },
   statusPill: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, alignSelf: 'flex-end' },
   statusText: { fontWeight: '900', fontSize: 11, letterSpacing: 0.3, textTransform: 'uppercase' },
   notesText: { color: Colors.text, fontWeight: '600', fontSize: 13, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: 10 },
-  actionBtn: { flex: 1, height: 48, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  actionBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
   actionConfirm: { backgroundColor: '#16A34A' },
   actionCancel: { backgroundColor: '#DC2626' },
   actionDisabled: { opacity: 0.45 },
