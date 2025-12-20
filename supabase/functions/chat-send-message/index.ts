@@ -121,20 +121,23 @@ Deno.serve(async (req: Request) => {
 
   const token = getBearerToken(req);
   const ip = getClientIp(req);
+
+  const isProtectedMode = mode === 'public_auth' || mode === 'private_user' || mode === 'admin';
+
+  if (isProtectedMode && !token) {
+    return jsonResponse(401, { error: { message: 'Missing bearer token', status: 401 } });
+  }
+
   const guestId = mode === 'public_guest' ? getGuestId(req) : null;
 
   if (mode === 'public_guest' && !guestId) {
     return jsonResponse(400, { error: { message: 'Missing x-guest-id header', status: 400 } });
   }
 
-  // Auth only needed for non-guest modes
+  // Auth only needed for protected modes
   let userId: string | null = null;
 
-  if (mode !== 'public_guest') {
-    if (!token) {
-      return jsonResponse(401, { error: { message: 'Missing bearer token', status: 401 } });
-    }
-
+  if (isProtectedMode) {
     const authClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -150,8 +153,7 @@ Deno.serve(async (req: Request) => {
 
   // Admin gate
   if (mode === 'admin') {
-    if (!token) return jsonResponse(401, { error: { message: 'Missing bearer token', status: 401 } });
-    const jwtRole = getJwtRole(token);
+    const jwtRole = getJwtRole(token ?? '');
     if (jwtRole !== 'admin') {
       return jsonResponse(403, { error: { message: 'Admin only', status: 403 } });
     }
