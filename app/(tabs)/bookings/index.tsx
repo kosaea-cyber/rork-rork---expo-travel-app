@@ -1,5 +1,14 @@
-import React, { useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, SafeAreaView } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  SafeAreaView,
+  RefreshControl,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
@@ -16,9 +25,20 @@ export default function BookingsScreen() {
   const error = useBookingStore((s) => s.error);
   const fetchMyBookings = useBookingStore((s) => s.fetchMyBookings);
 
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
   const sorted = useMemo(() => {
     return [...myBookings].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   }, [myBookings]);
+
+  const onRefresh = useCallback(async () => {
+    try {
+      setIsRefreshing(true);
+      await fetchMyBookings();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [fetchMyBookings]);
 
   useEffect(() => {
     if (user) {
@@ -42,25 +62,32 @@ export default function BookingsScreen() {
     );
   }
 
-  const getStatusColor = (status: string) => {
+  const getStatusMeta = (status: string): { label: string; color: string } => {
     switch (status) {
       case 'confirmed':
-        return Colors.success;
+        return { label: t('confirmed') ?? 'Confirmed', color: Colors.success };
       case 'cancelled':
-        return Colors.error;
+        return { label: t('cancelled') ?? 'Cancelled', color: Colors.error };
       default:
-        return '#FFA000';
+        return { label: t('pending') ?? 'Pending', color: '#FFA000' };
     }
   };
 
-  const renderItem = ({ item }: { item: BookingRow }) => (
-    <TouchableOpacity style={styles.card} onPress={() => router.push(`/(tabs)/bookings/${item.id}`)}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.idText}>#{item.id.slice(0, 8)}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-          <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>{t(item.status)}</Text>
+  const renderItem = ({ item }: { item: BookingRow }) => {
+    const meta = getStatusMeta(item.status);
+    return (
+      <TouchableOpacity
+        testID={`booking-item-${item.id}`}
+        style={styles.card}
+        onPress={() => router.push(`/(tabs)/bookings/${item.id}`)}
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.idText}>#{item.id.slice(0, 8)}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: meta.color + '18' }]}>
+            <View style={[styles.statusDot, { backgroundColor: meta.color }]} />
+            <Text style={[styles.statusText, { color: meta.color }]}>{meta.label}</Text>
+          </View>
         </View>
-      </View>
 
       <Text style={styles.packageTitle} numberOfLines={1}>
         {item.notes?.trim() ? item.notes.split('\n')[0] : t('booking') ?? 'Booking'}
@@ -70,8 +97,9 @@ export default function BookingsScreen() {
         <Text style={styles.dateLabel}>{t('createdAt') ?? 'Created:'}</Text>
         <Text style={styles.dateValue}>{new Date(item.created_at).toLocaleString()}</Text>
       </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -86,10 +114,19 @@ export default function BookingsScreen() {
         </View>
       ) : (
         <FlatList
+          testID="my-bookings-list"
           data={sorted}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors.tint}
+              colors={[Colors.tint]}
+            />
+          }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>{error?.message ?? t('noBookings')}</Text>
@@ -169,13 +206,22 @@ const styles = StyleSheet.create({
     fontFamily: 'Courier', // Monospace for ID
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
   },
   statusText: {
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '900',
+    letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
   packageTitle: {

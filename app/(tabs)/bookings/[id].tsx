@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Colors from '@/constants/colors';
@@ -20,6 +20,17 @@ export default function BookingDetailsScreen() {
   const user = useAuthStore((state) => state.user);
 
   const booking = bookings.find((b: BookingRow) => b.id === String(id));
+
+  const statusMeta = useMemo(() => {
+    const status = booking?.status ?? 'pending';
+    if (status === 'confirmed') {
+      return { label: t('confirmed') ?? 'Confirmed', color: Colors.success, bg: Colors.success + '14' };
+    }
+    if (status === 'cancelled') {
+      return { label: t('cancelled') ?? 'Cancelled', color: Colors.error, bg: Colors.error + '14' };
+    }
+    return { label: t('pending') ?? 'Pending', color: '#FFA000', bg: '#FFA00014' };
+  }, [booking?.status, t]);
 
   const handleContact = useCallback(async () => {
     try {
@@ -59,25 +70,27 @@ export default function BookingDetailsScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} testID="booking-details">
+      <View style={styles.statusCard} testID="booking-status-section">
+        <Text style={styles.statusTitle}>{t('status') ?? 'Status'}</Text>
+        <View style={[styles.statusPill, { backgroundColor: statusMeta.bg }]}>
+          <View style={[styles.statusDot, { backgroundColor: statusMeta.color }]} />
+          <Text style={[styles.statusText, { color: statusMeta.color }]}>{statusMeta.label}</Text>
+        </View>
+        <Text style={styles.statusHint}>
+          {t('bookingStatusHint') ??
+            'You will receive a message in Messages when your booking is confirmed.'}
+        </Text>
+      </View>
+
       <View style={styles.card}>
         <Text style={styles.label}>Booking ID</Text>
         <Text style={styles.value}>{booking.id}</Text>
 
         <View style={styles.divider} />
 
-        <Text style={styles.label}>Status</Text>
-        <Text style={[styles.value, { color: Colors.tint }]}>{t(booking.status)}</Text>
-
-        <View style={styles.divider} />
-
-        <Text style={styles.label}>Created</Text>
+        <Text style={styles.label}>{t('bookingDateTime') ?? 'Booking date/time'}</Text>
         <Text style={styles.value}>{new Date(booking.created_at).toLocaleString()}</Text>
-
-        <View style={styles.divider} />
-
-        <Text style={styles.label}>User</Text>
-        <Text style={styles.value}>{booking.user_id}</Text>
 
         {booking.notes?.trim() ? (
           <>
@@ -88,7 +101,7 @@ export default function BookingDetailsScreen() {
         ) : null}
       </View>
 
-      <TouchableOpacity style={styles.button} onPress={handleContact}>
+      <TouchableOpacity testID="booking-open-chat" style={styles.button} onPress={handleContact}>
         <Text style={styles.buttonText}>{t('openConversation')}</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -98,6 +111,47 @@ export default function BookingDetailsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: 24 },
+  statusCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 14,
+  },
+  statusTitle: {
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+    marginBottom: 12,
+  },
+  statusPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  statusHint: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   card: {
     backgroundColor: Colors.card,
     borderRadius: 12,
