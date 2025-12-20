@@ -157,21 +157,53 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       await assertAdmin();
-      console.log('[bookingStore] updateBookingStatusAdmin', { bookingId, nextStatus });
+      console.log('[bookingStore] updateBookingStatusAdmin (edge)', { bookingId, nextStatus });
 
-      const { data, error } = await supabase
-        .from('bookings')
-        .update({ status: nextStatus })
-        .eq('id', bookingId)
-        .select('id, user_id, status, notes, created_at, updated_at')
-        .single();
-
-      if (error) {
-        console.error('[bookingStore] updateBookingStatusAdmin update error', error.message);
-        throw new Error(error.message);
+      const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+      if (!baseUrl) {
+        throw new Error('Missing Supabase URL');
       }
 
-      const updated = data as BookingRow;
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        console.error('[bookingStore] auth.getSession error', sessionError.message);
+      }
+
+      const accessToken = sessionData.session?.access_token ?? null;
+      if (!accessToken) {
+        throw new Error('Not authenticated');
+      }
+
+      const url = `${baseUrl.replace(/\/$/, '')}/functions/v1/booking-update-status`;
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ bookingId, nextStatus }),
+      });
+
+      const json = (await res.json().catch(() => null)) as
+        | { data?: { booking?: BookingRow | null; conversationId?: string | null } | null; error?: unknown }
+        | null;
+
+      if (!res.ok) {
+        const msg =
+          (json?.error as any)?.message ??
+          (typeof (json?.error as any)?.details === 'string' ? (json?.error as any)?.details : null) ??
+          `Request failed (${res.status})`;
+        console.error('[bookingStore] updateBookingStatusAdmin edge failed', { status: res.status, msg, raw: json });
+        throw new Error(msg);
+      }
+
+      const updated = (json?.data?.booking ?? null) as BookingRow | null;
+      if (!updated) {
+        console.error('[bookingStore] updateBookingStatusAdmin edge missing booking', { json });
+        throw new Error('Failed to update booking');
+      }
+
       set({
         isLoading: false,
         adminBookings: get().adminBookings.map((b) => (b.id === bookingId ? updated : b)),
