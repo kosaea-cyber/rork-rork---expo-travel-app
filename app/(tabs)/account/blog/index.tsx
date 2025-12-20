@@ -95,7 +95,7 @@ export default function BlogListScreen() {
           testID={`blog-card-${item.id}`}
           style={styles.card}
           onPress={() =>
-            router.push({ pathname: '/(tabs)/account/blog/[id]', params: { id: item.id } })
+            router.push({ pathname: '/(tabs)/account/blog/[id]' as any, params: { id: item.id } })
           }
           activeOpacity={0.85}
         >

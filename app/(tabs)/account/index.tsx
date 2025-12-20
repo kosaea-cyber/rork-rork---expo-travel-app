@@ -20,7 +20,7 @@ export default function AccountScreen() {
         style: 'destructive', 
         onPress: async () => {
           await logout();
-          router.replace('/auth/welcome');
+          router.replace('/auth/welcome' as any);
         } 
       },
     ]);
@@ -67,7 +67,7 @@ export default function AccountScreen() {
 
   const handlePress = (item: typeof menuItems[0]) => {
     if (item.authRequired && (isGuest || !user)) {
-      router.push('/auth/login');
+      router.push('/auth/login' as any);
     } else {
       router.push(item.route as any);
     }
@@ -92,7 +92,7 @@ export default function AccountScreen() {
         {(!user && isGuest) && (
           <TouchableOpacity 
             style={styles.loginButton}
-            onPress={() => router.push('/auth/login')}
+            onPress={() => router.push('/auth/login' as any)}
           >
             <Text style={styles.loginButtonText}>{t('login')}</Text>
           </TouchableOpacity>
@@ -114,7 +114,7 @@ export default function AccountScreen() {
         ))}
 
         {user && isAdmin && (
-          <TouchableOpacity style={[styles.menuItem, { borderColor: Colors.tint, backgroundColor: Colors.tint + '10' }]} onPress={() => router.push('/admin')}>
+          <TouchableOpacity style={[styles.menuItem, { borderColor: Colors.tint, backgroundColor: Colors.tint + '10' }]} onPress={() => router.push('/admin' as any)}>
             <View style={styles.menuIcon}>
               <LayoutDashboard color={Colors.tint} size={24} />
             </View>

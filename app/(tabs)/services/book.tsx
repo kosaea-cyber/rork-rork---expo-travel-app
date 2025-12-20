@@ -251,7 +251,7 @@ export default function BookingRequestScreen() {
     }
 
     Alert.alert('Success', t('bookingRequestSent') ?? 'Booking request sent', [
-      { text: 'OK', onPress: () => router.navigate('/(tabs)/bookings') },
+      { text: 'OK', onPress: () => router.navigate('/(tabs)/bookings' as any) },
     ]);
   }, [createBooking, notes, pkg, pkgTitle, range, router, t, travelers, user]);
 

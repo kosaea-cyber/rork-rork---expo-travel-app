@@ -125,7 +125,7 @@ export default function ServicesScreen() {
         <TouchableOpacity
           testID={`services-category-${item.id}`}
           style={styles.serviceCard}
-          onPress={() => router.push(`/(tabs)/services/${item.id}`)}
+          onPress={() => router.push({ pathname: '/(tabs)/services/[id]' as any, params: { id: item.id } })}
           activeOpacity={0.9}
         >
           <View style={styles.thumbWrap}>

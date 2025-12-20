@@ -40,7 +40,7 @@ export default function RootLayout() {
 
       if (!session && !guestMode) {
         console.log('[RootLayout] session is null -> redirect to /auth/welcome');
-        router.replace('/auth/welcome');
+        router.replace('/auth/welcome' as any);
       }
 
       try {
@@ -64,7 +64,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = primaryRouteSegment === "auth";
+    const inAuthGroup = primaryRouteSegment === ('auth' as any);
     const isAuthenticated = Boolean(user) || Boolean(isGuest);
 
     console.log('RootLayout Check:', { 
@@ -82,10 +82,10 @@ export default function RootLayout() {
 
     if (!isAuthenticated && !inAuthGroup) {
       console.log('Redirecting to Welcome');
-      router.replace("/auth/welcome");
+      router.replace('/auth/welcome' as any);
     } else if (user && inAuthGroup && !isGuest) {
       console.log('Redirecting to Home (Authenticated User in Auth Group)');
-      router.replace("/(tabs)/home");
+      router.replace('/(tabs)/home' as any);
     }
   }, [user, isGuest, isLoading, segments, primaryRouteSegment, router]);
 

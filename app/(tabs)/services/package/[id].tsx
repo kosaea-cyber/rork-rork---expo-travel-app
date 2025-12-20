@@ -100,9 +100,9 @@ export default function PackageDetailsScreen() {
     if (!pkgData) return;
 
     if (user) {
-      router.push({ pathname: '/(tabs)/services/book', params: { packageId: pkgData.id } });
+      router.push({ pathname: '/(tabs)/services/book' as any, params: { packageId: pkgData.id } });
     } else {
-      router.push('/auth/login');
+      router.push('/auth/login' as any);
     }
   }, [pkgData, router, user]);
 

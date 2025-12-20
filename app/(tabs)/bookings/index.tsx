@@ -55,7 +55,7 @@ export default function BookingsScreen() {
     return (
       <View style={[styles.container, styles.centerContent]}>
         <Text style={styles.message}>{t('loginToBook')}</Text>
-        <TouchableOpacity style={styles.button} onPress={() => router.push('/auth/login')}>
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/auth/login' as any)}>
           <Text style={styles.buttonText}>{t('login')}</Text>
         </TouchableOpacity>
       </View>
@@ -79,7 +79,7 @@ export default function BookingsScreen() {
       <TouchableOpacity
         testID={`booking-item-${item.id}`}
         style={styles.card}
-        onPress={() => router.push(`/(tabs)/bookings/${item.id}`)}
+        onPress={() => router.push({ pathname: '/(tabs)/bookings/[id]' as any, params: { id: item.id } })}
       >
         <View style={styles.cardHeader}>
           <Text style={styles.idText}>#{item.id.slice(0, 8)}</Text>

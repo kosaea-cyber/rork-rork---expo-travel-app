@@ -89,7 +89,7 @@ export default function BlogPostScreen() {
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
-    else router.replace('/(tabs)/account/blog');
+    else router.replace('/(tabs)/account/blog' as any);
   }, [router]);
 
   if (!postId) {

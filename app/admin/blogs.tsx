@@ -61,15 +61,17 @@ export default function AdminBlogs() {
 
   const goNew = useCallback(() => {
     // uses the existing route app/admin/blog/[id].tsx with id="new"
-    router.push({ pathname: '/admin/blog/[id]', params: { id: 'new' } });
+    router.push({ pathname: '/admin/blog/[id]' as any, params: { id: 'new' } });
   }, [router]);
 
   const goEdit = useCallback(
     (id: string) => {
-      router.push({ pathname: '/admin/blog/[id]', params: { id } });
+      router.push({ pathname: '/admin/blog/[id]' as any, params: { id } });
     },
     [router],
   );
+
+  const { mutateAsync: deleteBlog } = deleteMutation;
 
   const onDelete = useCallback(
     (id: string) => {
@@ -80,7 +82,7 @@ export default function AdminBlogs() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteMutation.mutateAsync(id);
+              await deleteBlog(id);
             } catch (e) {
               const msg = e instanceof Error ? e.message : 'Delete failed.';
               Alert.alert('Error', msg);
@@ -89,7 +91,7 @@ export default function AdminBlogs() {
         },
       ]);
     },
-    [deleteMutation],
+    [deleteBlog],
   );
 
   const renderItem = useCallback(

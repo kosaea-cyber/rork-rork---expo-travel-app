@@ -93,7 +93,7 @@ export default function PackagesListScreen() {
           testID={`package-card-${item.id}`}
           style={styles.card}
           onPress={() =>
-            router.push({ pathname: '/(tabs)/services/package/[id]', params: { id: item.id } })
+            router.push({ pathname: '/(tabs)/services/package/[id]' as any, params: { id: item.id } })
           }
         >
           <View style={styles.row}>
