@@ -3,6 +3,7 @@ import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from '
 import { useRouter } from 'expo-router';
 
 import Colors from '@/constants/colors';
+import { supabase } from '@/lib/supabase/client';
 import { useAuthStore } from '@/store/authStore';
 import { type Conversation, useChatStore } from '@/store/chatStore';
 
@@ -37,21 +38,22 @@ export default function ChatListScreen() {
         }
         ids.push(conv.id);
       } else {
-        if (user) {
-          const conv = await getOrCreatePrivateConversation();
-          if (!conv?.id) {
-            setUi({ status: 'error', message: 'Could not load your messages. Please try again.' });
-            return;
+        if (!user) {
+          console.log('[chat:list] guest -> signInAnonymously');
+          const { data: sessionData } = await supabase.auth.getSession();
+          const hasSession = Boolean(sessionData.session);
+          if (!hasSession) {
+            const { error: anonErr } = await supabase.auth.signInAnonymously();
+            if (anonErr) throw anonErr;
           }
-          ids.push(conv.id);
-        } else {
-          const conv = await getPublicConversation();
-          if (!conv?.id) {
-            setUi({ status: 'error', message: 'Public chat is not configured yet. Please contact support.' });
-            return;
-          }
-          ids.push(conv.id);
         }
+
+        const conv = await getOrCreatePrivateConversation();
+        if (!conv?.id) {
+          setUi({ status: 'error', message: 'Could not load your messages. Please try again.' });
+          return;
+        }
+        ids.push(conv.id);
       }
 
       setConversationIds(ids);

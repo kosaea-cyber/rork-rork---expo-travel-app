@@ -5,9 +5,10 @@ import { Send } from 'lucide-react-native';
 
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
+import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
+import { supabase } from '@/lib/supabase/client';
 import { useAuthStore } from '@/store/authStore';
 import { type Message, type SendMode, useChatStore } from '@/store/chatStore';
-import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
 import { useProfileStore } from '@/store/profileStore';
 
 export default function ChatScreen() {
@@ -32,6 +33,7 @@ export default function ChatScreen() {
   const isAdmin = useAuthStore((state) => state.isAdmin);
 
   const [resolvedConversationId, setResolvedConversationId] = useState<string>('');
+  const [currentUserId, setCurrentUserId] = useState<string>('');
 
   useEffect(() => {
     let cancelled = false;
@@ -42,14 +44,34 @@ export default function ChatScreen() {
         return;
       }
 
-      if (!user) {
-        setResolvedConversationId('');
-        return;
-      }
+      console.log('[chat] non-admin open -> ensure anonymous/private conversation');
 
-      const conv = await getOrCreatePrivateConversation();
-      if (!cancelled) {
-        setResolvedConversationId(conv?.id ?? '');
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const hasSession = Boolean(sessionData.session);
+
+        if (!hasSession) {
+          const { error: anonErr } = await supabase.auth.signInAnonymously();
+          if (anonErr) throw anonErr;
+        }
+
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr) {
+          console.warn('[chat] auth.getUser failed', userErr);
+        }
+
+        const uid = userData.user?.id ?? '';
+        if (!cancelled) setCurrentUserId(uid);
+
+        const conv = await getOrCreatePrivateConversation();
+        if (!cancelled) {
+          setResolvedConversationId(conv?.id ?? '');
+        }
+      } catch (e) {
+        console.error('[chat] ensure private conversation failed', e);
+        if (!cancelled) {
+          setResolvedConversationId('');
+        }
       }
     };
 
@@ -58,7 +80,7 @@ export default function ChatScreen() {
     return () => {
       cancelled = true;
     };
-  }, [getOrCreatePrivateConversation, isAdmin, routeConversationId, user]);
+  }, [getOrCreatePrivateConversation, isAdmin, routeConversationId]);
 
   const conversationId = isAdmin ? routeConversationId : resolvedConversationId;
 
@@ -194,9 +216,11 @@ export default function ChatScreen() {
       const isSystem = item.senderType === 'system';
       const isAdminSender = item.senderType === 'admin';
 
+      const effectiveUserId = user?.id ?? currentUserId;
+
       const isFromCurrentUser =
         item.senderType === 'user' &&
-        ((user?.id != null && item.senderId === user.id) || (user == null && item.senderId == null));
+        ((effectiveUserId ? item.senderId === effectiveUserId : false) || (effectiveUserId === '' && item.senderId == null));
 
       const containerStyle = isFromCurrentUser
         ? styles.userMessage
@@ -233,13 +257,13 @@ export default function ChatScreen() {
         </View>
       );
     },
-    [user]
+    [currentUserId, user]
   );
 
   if (!conversationId) {
     return (
       <View style={styles.container}>
-        <Text style={{ color: Colors.text }}>{user ? 'Conversation not found' : 'Please sign in to chat with support'}</Text>
+        <Text style={{ color: Colors.text }}>Conversation not found</Text>
       </View>
     );
   }
