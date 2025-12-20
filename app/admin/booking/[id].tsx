@@ -10,7 +10,7 @@ import {
   Animated,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, CheckCircle2, UserRound, XCircle } from 'lucide-react-native';
+import { ArrowLeft, CheckCircle2, UserRound, XCircle, Package as PackageIcon, Users } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 import { type BookingRow, type BookingStatus, useBookingStore } from '@/store/bookingStore';
@@ -19,11 +19,55 @@ type ProfileLite = { id: string; full_name?: string | null; name?: string | null
 
 type Snack = { type: 'success' | 'error'; message: string } | null;
 
-function extractPreferredStartDate(notes: string | null): string | null {
+/**
+ * NOTES format (examples):
+ * - Package: Skin Glow Treatment (uuid)
+ * - Preferred start date: 2025-12-01
+ * - Preferred date range: 2025-12-01 - 2025-12-10
+ * - Preferred dates: 2025-12-01 → 2025-12-10
+ * - Travelers: 2
+ */
+
+function extractPackageLine(notes: string | null): { title: string | null; packageId: string | null } {
+  if (!notes) return { title: null, packageId: null };
+
+  // Package: Some Title (uuid)
+  const m = notes.match(/^\s*Package:\s*(.+?)\s*\(([^)]+)\)\s*$/im);
+  const title = (m?.[1] ?? '').trim();
+  const packageId = (m?.[2] ?? '').trim();
+
+  return {
+    title: title || null,
+    packageId: packageId || null,
+  };
+}
+
+function extractTravelers(notes: string | null): number | null {
   if (!notes) return null;
-  const m = notes.match(/Preferred start date:\s*(.+)/i);
-  const raw = m?.[1]?.trim() ?? '';
-  return raw ? raw : null;
+  const m = notes.match(/^\s*Travelers:\s*(\d+)\s*$/im);
+  const n = m?.[1] ? parseInt(m[1], 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function extractPreferredDates(notes: string | null): { from: string | null; to: string | null; label: string | null } {
+  if (!notes) return { from: null, to: null, label: null };
+
+  // 1) Preferred date range: A - B
+  let m = notes.match(/^\s*Preferred\s*(?:date\s*range|dates)\s*:\s*(.+?)\s*(?:-|–|—|->|→)\s*(.+?)\s*$/im);
+  if (m?.[1] && m?.[2]) {
+    const from = m[1].trim();
+    const to = m[2].trim();
+    if (from && to) return { from, to, label: `${from} → ${to}` };
+  }
+
+  // 2) Preferred start date: A
+  m = notes.match(/^\s*Preferred\s*start\s*date:\s*(.+?)\s*$/im);
+  if (m?.[1]) {
+    const from = m[1].trim();
+    if (from) return { from, to: null, label: from };
+  }
+
+  return { from: null, to: null, label: null };
 }
 
 function formatCustomerLabel(p: ProfileLite | null, userId: string): string {
@@ -147,7 +191,10 @@ export default function BookingDetail() {
               }
               setBooking(updated);
               await fetchAllBookingsForAdmin();
-              showSnack({ type: 'success', message: status === 'confirmed' ? 'Booking confirmed.' : 'Booking cancelled.' });
+              showSnack({
+                type: 'success',
+                message: status === 'confirmed' ? 'Booking confirmed.' : 'Booking cancelled.',
+              });
             } finally {
               setActionLoading(false);
             }
@@ -173,8 +220,19 @@ export default function BookingDetail() {
   if (!booking) return <View style={styles.center}><Text style={{ color: Colors.text }}>Booking not found</Text></View>;
 
   const statusColor = booking.status === 'confirmed' ? '#16A34A' : booking.status === 'cancelled' ? '#DC2626' : '#F59E0B';
-  const preferred = extractPreferredStartDate(booking.notes);
+
   const customer = formatCustomerLabel(profile, booking.user_id);
+
+  const pkgInfo = extractPackageLine(booking.notes);
+  const travelers = extractTravelers(booking.notes);
+  const preferredDates = extractPreferredDates(booking.notes);
+
+  const packageLabel = useMemo(() => {
+    if (pkgInfo.title && pkgInfo.packageId) return `${pkgInfo.title} (${pkgInfo.packageId})`;
+    if (pkgInfo.title) return pkgInfo.title;
+    if (pkgInfo.packageId) return pkgInfo.packageId;
+    return null;
+  }, [pkgInfo.packageId, pkgInfo.title]);
 
   return (
     <View style={styles.container}>
@@ -228,10 +286,33 @@ export default function BookingDetail() {
               </View>
             </View>
 
+            {/* ✅ NEW: Package */}
+            <View style={styles.kvRow}>
+              <Text style={styles.kLabel}>Package</Text>
+              <View style={styles.customerInline}>
+                <PackageIcon size={14} color={Colors.textSecondary} />
+                <Text style={styles.kValue} numberOfLines={1}>
+                  {packageLabel ?? '—'}
+                </Text>
+              </View>
+            </View>
+
+            {/* ✅ NEW: Travelers */}
+            <View style={styles.kvRow}>
+              <Text style={styles.kLabel}>Travelers</Text>
+              <View style={styles.customerInline}>
+                <Users size={14} color={Colors.textSecondary} />
+                <Text style={styles.kValue} numberOfLines={1}>
+                  {travelers ? String(travelers) : '—'}
+                </Text>
+              </View>
+            </View>
+
+            {/* ✅ Improved: Date/Time (supports range) */}
             <View style={styles.kvRow}>
               <Text style={styles.kLabel}>Date/Time</Text>
               <Text style={styles.kValue} numberOfLines={1}>
-                {preferred ?? '—'}
+                {preferredDates.label ?? '—'}
               </Text>
             </View>
           </View>
