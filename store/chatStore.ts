@@ -36,6 +36,7 @@ type ConversationRow = {
   id: string;
   type: ConversationType;
   customer_id: string | null;
+  guest_id?: string | null; // ✅ NEW (لـ guest private conversations)
   created_at: string | null;
   last_message_at: string | null;
   last_message_preview?: string | null;
@@ -117,6 +118,57 @@ function mergeMessages(existing: Message[], incoming: Message[]): Message[] {
   return Array.from(map.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+async function getGuestId(): Promise<string> {
+  try {
+    const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+    const key = 'chat_guest_id';
+
+    let id = await AsyncStorage.getItem(key);
+    if (id && id.trim()) return id;
+
+    // prefer expo-crypto randomUUID if available
+    try {
+      const Crypto = await import('expo-crypto');
+      const maybeUuid = (Crypto as unknown as { randomUUID?: () => string }).randomUUID;
+      if (typeof maybeUuid === 'function') {
+        id = maybeUuid();
+      }
+    } catch {
+      // ignore
+    }
+
+    id = id ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    // normalize to allowed header charset: [a-zA-Z0-9_-]
+    id = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+
+    await AsyncStorage.setItem(key, id);
+    return id;
+  } catch (e) {
+    console.warn('[chatStore] getGuestId failed, using ephemeral id', safeErrorDetails(e));
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  }
+}
+
+function getEdgeBase(): string {
+  const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+  return baseUrl.replace(/\/$/, '');
+}
+
+async function getAccessTokenOrNull(): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return null;
+    return data.session?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function isAuthedSession(): Promise<boolean> {
+  const token = await getAccessTokenOrNull();
+  return Boolean(token);
+}
+
 interface ChatState {
   conversations: Conversation[];
   messagesByConversationId: Record<string, Message[]>;
@@ -128,7 +180,8 @@ interface ChatState {
   lastSendAtMs: number;
 
   getPublicConversation: () => Promise<Conversation | null>;
-  getOrCreatePrivateConversation: () => Promise<Conversation | null>;
+  getOrCreatePrivateConversation: () => Promise<Conversation | null>; // now supports guest too (creates guest private)
+
   fetchMessages: (conversationId: string, limit: number, before?: string) => Promise<Message[]>;
   sendMessage: (conversationId: string, body: string, mode: SendMode) => Promise<Message | null>;
   subscribeToConversation: (conversationId: string) => () => void;
@@ -153,8 +206,6 @@ export const useChatStore = create<ChatState>((set, get) => {
     isLoading: false,
     error: null,
     lastSendAtMs: 0,
-
-    // ... (باقي الدوال كما هي عندك) ...
 
     getPublicConversation: async () => {
       set({ isLoading: true, error: null });
@@ -183,46 +234,101 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
+    /**
+     * ✅ NEW BEHAVIOR:
+     * - If user is authenticated => old behavior (private conversation by customer_id)
+     * - If NOT authenticated => create/get a guest private conversation via Edge Function:
+     *   /functions/v1/chat-get-or-create-guest-conversation
+     */
     getOrCreatePrivateConversation: async () => {
       set({ isLoading: true, error: null });
+
       try {
-        const { data: authData } = await supabase.auth.getUser();
-        const userId = authData.user?.id ?? '';
-        if (!userId) {
-          set({ isLoading: false, error: 'Not authenticated' });
-          return null;
-        }
+        const authed = await isAuthedSession();
 
-        const { data: existingData, error: existingError } = await supabase
-          .from('conversations')
-          .select(
-            'id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user'
-          )
-          .eq('type', 'private')
-          .eq('customer_id', userId)
-          .order('last_message_at', { ascending: false })
-          .limit(1);
+        // -------------------------
+        // AUTH USER: old behavior
+        // -------------------------
+        if (authed) {
+          const { data: authData } = await supabase.auth.getUser();
+          const userId = authData.user?.id ?? '';
+          if (!userId) {
+            set({ isLoading: false, error: 'Not authenticated' });
+            return null;
+          }
 
-        if (existingError) throw existingError;
+          const { data: existingData, error: existingError } = await supabase
+            .from('conversations')
+            .select(
+              'id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user'
+            )
+            .eq('type', 'private')
+            .eq('customer_id', userId)
+            .order('last_message_at', { ascending: false })
+            .limit(1);
 
-        const existingRow = (existingData?.[0] ?? null) as ConversationRow | null;
-        if (existingRow) {
-          const conv = mapConversationRow(existingRow);
+          if (existingError) throw existingError;
+
+          const existingRow = (existingData?.[0] ?? null) as ConversationRow | null;
+          if (existingRow) {
+            const conv = mapConversationRow(existingRow);
+            set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
+            return conv;
+          }
+
+          const { data: inserted, error: insertError } = await supabase
+            .from('conversations')
+            .insert({ type: 'private', customer_id: userId })
+            .select(
+              'id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user'
+            )
+            .single();
+
+          if (insertError) throw insertError;
+
+          const conv = mapConversationRow(inserted as ConversationRow);
           set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
           return conv;
         }
 
-        const { data: inserted, error: insertError } = await supabase
-          .from('conversations')
-          .insert({ type: 'private', customer_id: userId })
-          .select(
-            'id, type, customer_id, created_at, last_message_at, last_message_preview, last_sender_type, unread_count_admin, unread_count_user'
-          )
-          .single();
+        // -------------------------
+        // GUEST: Edge Function
+        // -------------------------
+        const base = getEdgeBase();
+        if (!base) {
+          set({ isLoading: false, error: 'Missing Supabase URL' });
+          return null;
+        }
 
-        if (insertError) throw insertError;
+        const guestId = await getGuestId();
+        const url = `${base}/functions/v1/chat-get-or-create-guest-conversation`;
 
-        const conv = mapConversationRow(inserted as ConversationRow);
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-guest-id': guestId,
+          },
+          body: JSON.stringify({}), // no body needed
+        });
+
+        const json = (await res.json().catch(() => null)) as
+          | { data?: ConversationRow | null; error?: unknown }
+          | null;
+
+        if (!res.ok) {
+          const msg = normalizeSupabaseError(json?.error ?? { status: res.status, message: json ?? res.statusText });
+          set({ isLoading: false, error: msg });
+          return null;
+        }
+
+        const row = (json?.data ?? null) as ConversationRow | null;
+        if (!row?.id) {
+          set({ isLoading: false, error: 'Chat is not ready yet' });
+          return null;
+        }
+
+        const conv = mapConversationRow(row);
         set((s) => ({ conversations: upsertConversation(s.conversations, conv), isLoading: false }));
         return conv;
       } catch (e) {
@@ -232,29 +338,90 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
+    /**
+     * ✅ NEW:
+     * - Authed => direct Supabase query (as before)
+     * - Guest => Edge Function /chat-fetch-messages with x-guest-id
+     */
     fetchMessages: async (conversationId, limit, before) => {
       if (!conversationId) return [];
       set({ isLoading: true, error: null });
 
       try {
-        let q = supabase
-          .from('messages')
-          .select('id, conversation_id, sender_type, sender_id, body, created_at')
-          .eq('conversation_id', conversationId)
-          .order('created_at', { ascending: false })
-          .limit(limit);
+        const authed = await isAuthedSession();
 
-        if (before) q = q.lt('created_at', before);
+        // -------------------------
+        // AUTH: direct query
+        // -------------------------
+        if (authed) {
+          let q = supabase
+            .from('messages')
+            .select('id, conversation_id, sender_type, sender_id, body, created_at')
+            .eq('conversation_id', conversationId)
+            .order('created_at', { ascending: false })
+            .limit(limit);
 
-        const { data, error } = await q;
-        if (error) throw error;
+          if (before) q = q.lt('created_at', before);
 
-        const rows = (data ?? []) as MessageRow[];
-        const incoming = rows.map(mapMessageRow).reverse();
+          const { data, error } = await q;
+          if (error) throw error;
+
+          const rows = (data ?? []) as MessageRow[];
+          const incoming = rows.map(mapMessageRow).reverse();
+
+          set((s) => {
+            const existing = s.messagesByConversationId[conversationId] ?? [];
+            const hasMore = rows.length >= limit;
+            return {
+              messagesByConversationId: {
+                ...s.messagesByConversationId,
+                [conversationId]: mergeMessages(existing, incoming),
+              },
+              hasMoreByConversationId: {
+                ...s.hasMoreByConversationId,
+                [conversationId]: hasMore,
+              },
+              isLoading: false,
+            };
+          });
+
+          return incoming;
+        }
+
+        // -------------------------
+        // GUEST: Edge fetch
+        // -------------------------
+        const base = getEdgeBase();
+        if (!base) throw new Error('Missing Supabase URL');
+
+        const guestId = await getGuestId();
+        const url = `${base}/functions/v1/chat-fetch-messages`;
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-guest-id': guestId,
+          },
+          body: JSON.stringify({ conversationId, limit, before: before ?? null }),
+        });
+
+        const json = (await res.json().catch(() => null)) as
+          | { data?: MessageRow[] | null; error?: unknown; hasMore?: boolean }
+          | null;
+
+        if (!res.ok) {
+          const msg = normalizeSupabaseError(json?.error ?? { status: res.status, message: json ?? res.statusText });
+          set({ isLoading: false, error: msg });
+          return [];
+        }
+
+        const rows = (json?.data ?? []) as MessageRow[];
+        const incoming = rows.map(mapMessageRow); // already expected oldest->newest in our edge
 
         set((s) => {
           const existing = s.messagesByConversationId[conversationId] ?? [];
-          const hasMore = rows.length >= limit;
+          const hasMore = typeof json?.hasMore === 'boolean' ? json.hasMore : rows.length >= limit;
           return {
             messagesByConversationId: {
               ...s.messagesByConversationId,
@@ -277,7 +444,12 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    // ✅ أهم تعديل: إرسال مضمون (Edge Function optional + DB fallback)
+    /**
+     * ✅ NEW:
+     * - Guest ALWAYS sends via Edge with x-guest-id
+     * - Auth users can use Edge too (preferred) with bearer token
+     * - Fallback direct insert ONLY for authed sessions
+     */
     sendMessage: async (conversationId, body, mode) => {
       try {
         const trimmed = body.trim();
@@ -291,61 +463,83 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         set({ lastSendAtMs: now, error: null });
 
-        // 1) حدّد sender_type + sender_id
-        const senderType: MessageSenderType = mode === 'admin' ? 'admin' : 'user';
+        const base = getEdgeBase();
+        if (!base) {
+          set({ error: 'Missing Supabase URL' });
+          return null;
+        }
 
+        const edgeUrl = `${base}/functions/v1/chat-send-message`;
+
+        const token = await getAccessTokenOrNull();
+        const isGuest = !token;
+
+        const headers: Record<string, string> = { 'content-type': 'application/json' };
+
+        if (token) headers.authorization = `Bearer ${token}`;
+        if (isGuest) {
+          const guestId = await getGuestId();
+          headers['x-guest-id'] = guestId;
+        }
+
+        // ✅ Force correct mode for guests:
+        // guests are allowed ONLY with public_guest in our edge function
+        const effectiveMode: SendMode = isGuest ? 'public_guest' : mode;
+
+        // 1) Try Edge
+        try {
+          const res = await fetch(edgeUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ conversationId, body: trimmed, mode: effectiveMode }),
+          });
+
+          const json = (await res.json().catch(() => null)) as
+            | { data?: MessageRow | null; error?: unknown }
+            | null;
+
+          if (!res.ok) {
+            const msg = normalizeSupabaseError(json?.error ?? { status: res.status, message: json ?? res.statusText });
+            console.error('[chatStore] sendMessage edge failed', { status: res.status, msg, raw: json });
+            set({ error: msg });
+            return null;
+          }
+
+          const row = (json?.data ?? null) as MessageRow | null;
+          if (!row) {
+            set({ error: 'Failed to send message' });
+            return null;
+          }
+
+          const msg = mapMessageRow(row);
+
+          set((s) => {
+            const existing = s.messagesByConversationId[conversationId] ?? [];
+            return {
+              messagesByConversationId: {
+                ...s.messagesByConversationId,
+                [conversationId]: mergeMessages(existing, [msg]),
+              },
+            };
+          });
+
+          return msg;
+        } catch (e) {
+          // If guest -> no fallback (will fail via RLS). Return error.
+          if (isGuest) {
+            const msg = normalizeSupabaseError(e);
+            set({ error: msg });
+            return null;
+          }
+
+          console.warn('[chatStore] sendMessage edge crashed, trying fallback direct insert', safeErrorDetails(e));
+        }
+
+        // 2) Fallback direct insert (AUTH ONLY)
+        const senderType: MessageSenderType = mode === 'admin' ? 'admin' : 'user';
         const { data: userData } = await supabase.auth.getUser();
         const senderId = userData.user?.id ?? null;
 
-        // 2) جرّب Edge Function (إذا موجودة). إذا فشلت → نتابع fallback.
-        const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-        const normalizedBase = baseUrl.replace(/\/$/, '');
-        const edgeUrl = normalizedBase ? `${normalizedBase}/functions/v1/chat-send-message` : '';
-
-        let usedEdge = false;
-
-        if (edgeUrl) {
-          try {
-            const { data: sessionData } = await supabase.auth.getSession();
-            const accessToken = sessionData.session?.access_token ?? null;
-
-            const headers: Record<string, string> = { 'content-type': 'application/json' };
-            if (accessToken) headers.authorization = `Bearer ${accessToken}`;
-
-            const res = await fetch(edgeUrl, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ conversationId, body: trimmed, mode }),
-            });
-
-            if (res.ok) {
-              const json = (await res.json().catch(() => null)) as { data?: MessageRow | null } | null;
-              const row = (json?.data ?? null) as MessageRow | null;
-              if (row) {
-                const msg = mapMessageRow(row);
-                usedEdge = true;
-
-                set((s) => {
-                  const existing = s.messagesByConversationId[conversationId] ?? [];
-                  return {
-                    messagesByConversationId: {
-                      ...s.messagesByConversationId,
-                      [conversationId]: mergeMessages(existing, [msg]),
-                    },
-                  };
-                });
-
-                return msg;
-              }
-            }
-            // إذا edge ردّ لكنه فشل → نكمل fallback
-            console.warn('[chatStore] edge send failed, fallback to direct insert', { status: res.status });
-          } catch (e) {
-            console.warn('[chatStore] edge send crashed, fallback to direct insert', safeErrorDetails(e));
-          }
-        }
-
-        // 3) Fallback مباشر على Supabase DB (المهم)
         const { data: inserted, error: insertErr } = await supabase
           .from('messages')
           .insert({
@@ -359,14 +553,12 @@ export const useChatStore = create<ChatState>((set, get) => {
 
         if (insertErr) {
           const msg = normalizeSupabaseError(insertErr);
-          console.error('[chatStore] direct insert failed', safeErrorDetails(insertErr));
           set({ error: msg });
           return null;
         }
 
         const msg = mapMessageRow(inserted as MessageRow);
 
-        // تحديث محلي للواجهة
         set((s) => {
           const existing = s.messagesByConversationId[conversationId] ?? [];
           return {
@@ -377,7 +569,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           };
         });
 
-        // تحديث conversation preview بشكل "best effort" (إذا RLS تسمح)
+        // best-effort conversation meta update
         try {
           await supabase
             .from('conversations')
@@ -391,7 +583,6 @@ export const useChatStore = create<ChatState>((set, get) => {
           // ignore
         }
 
-        console.log('[chatStore] sendMessage success', { usedEdge, conversationId });
         return msg;
       } catch (e) {
         const msg = normalizeSupabaseError(e);
@@ -401,7 +592,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    // subscribeToConversation .. كما هو عندك (بدون تغيير)
+    /**
+     * Realtime:
+     * - For guests (no auth) realtime غالباً لن يشتغل حسب RLS/realtime settings
+     * - الكود يحاول realtime ثم يسقط على polling
+     */
     subscribeToConversation: (conversationId) => {
       console.log('[chatStore] subscribeToConversation', { conversationId });
 
@@ -415,7 +610,9 @@ export const useChatStore = create<ChatState>((set, get) => {
               realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'closed' },
               realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
             }));
-          } catch {}
+          } catch {
+            // ignore
+          }
         };
       }
 
@@ -450,28 +647,11 @@ export const useChatStore = create<ChatState>((set, get) => {
         const tick = async () => {
           try {
             if (stopped) return;
-            const { data, error } = await supabase
-              .from('messages')
-              .select('id, conversation_id, sender_type, sender_id, body, created_at')
-              .eq('conversation_id', conversationId)
-              .order('created_at', { ascending: false })
-              .limit(30);
-
-            if (error) return;
-
-            const rows = (data ?? []) as MessageRow[];
-            const incoming = rows.map(mapMessageRow).reverse();
-
-            set((s) => {
-              const prev = s.messagesByConversationId[conversationId] ?? [];
-              return {
-                messagesByConversationId: {
-                  ...s.messagesByConversationId,
-                  [conversationId]: mergeMessages(prev, incoming),
-                },
-              };
-            });
-          } catch {}
+            // Poll uses our fetchMessages, which supports guest via edge
+            await get().fetchMessages(conversationId, 30);
+          } catch {
+            // ignore
+          }
         };
 
         pollTimer = setInterval(() => void tick(), 7000);
@@ -509,6 +689,10 @@ export const useChatStore = create<ChatState>((set, get) => {
                   realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: null },
                 }));
               } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                set((s) => ({
+                  realtimeHealthByConversationId: { ...s.realtimeHealthByConversationId, [conversationId]: 'error' },
+                  realtimeErrorByConversationId: { ...s.realtimeErrorByConversationId, [conversationId]: status },
+                }));
                 startPolling();
               } else if (status === 'CLOSED') {
                 set((s) => ({
@@ -551,14 +735,18 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!conversationId) return;
       try {
         await supabase.from('conversations').update({ unread_count_user: 0 }).eq('id', conversationId);
-      } catch {}
+      } catch {
+        // ignore
+      }
     },
 
     markConversationReadForAdmin: async (conversationId: string) => {
       if (!conversationId) return;
       try {
         await supabase.from('conversations').update({ unread_count_admin: 0 }).eq('id', conversationId);
-      } catch {}
+      } catch {
+        // ignore
+      }
     },
 
     adminFetchConversations: async (limit) => {
