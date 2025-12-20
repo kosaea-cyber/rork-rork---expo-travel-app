@@ -227,23 +227,13 @@ export default function BookingRequestScreen() {
 
     const travelersInt = parseInt(travelers, 10) || 1;
 
-    const dateLine =
-      range && range.from
-        ? range.to && range.to !== range.from
-          ? `Preferred dates: ${range.from} to ${range.to}`
-          : `Preferred date: ${range.from}`
-        : 'Preferred date: (missing)';
-
-    const finalNotes = [
-      `Package: ${pkgTitle} (${pkg.id})`,
-      dateLine,
-      `Travelers: ${travelersInt}`,
-      notes?.trim() ? `Notes: ${notes.trim()}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const created = await createBooking({ notes: finalNotes });
+    const created = await createBooking({
+      packageId: pkg.id,
+      preferredStartDate: range.from,
+      preferredEndDate: range.to ?? null,
+      travelers: travelersInt,
+      customerNotes: notes?.trim() ? notes.trim() : undefined,
+    });
 
     if (!created) {
       Alert.alert(t('somethingWentWrong') ?? 'Something went wrong', t('retry') ?? 'Please try again');
@@ -253,7 +243,7 @@ export default function BookingRequestScreen() {
     Alert.alert('Success', t('bookingRequestSent') ?? 'Booking request sent', [
       { text: 'OK', onPress: () => router.navigate('/(tabs)/bookings' as any) },
     ]);
-  }, [createBooking, notes, pkg, pkgTitle, range, router, t, travelers, user]);
+  }, [createBooking, notes, pkg, range, router, t, travelers, user]);
 
   if (!packageId) {
     return (

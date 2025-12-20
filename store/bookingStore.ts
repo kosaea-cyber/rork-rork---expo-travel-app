@@ -8,12 +8,21 @@ export type BookingRow = {
   user_id: string;
   status: BookingStatus;
   notes: string | null;
+  package_id: string | null;
+  preferred_start_date: string | null;
+  preferred_end_date: string | null;
+  travelers: number;
+  customer_notes: string | null;
   created_at: string;
   updated_at: string | null;
 };
 
 export type CreateBookingPayload = {
-  notes: string;
+  packageId: string;
+  preferredStartDate: string;
+  preferredEndDate?: string | null;
+  travelers: number;
+  customerNotes?: string;
 };
 
 type StoreError = {
@@ -64,6 +73,9 @@ interface BookingState {
   updateBookingStatusAdmin: (bookingId: string, nextStatus: BookingStatus) => Promise<BookingRow | null>;
 }
 
+const bookingSelect =
+  'id, user_id, status, notes, package_id, preferred_start_date, preferred_end_date, travelers, customer_notes, created_at, updated_at';
+
 export const useBookingStore = create<BookingState>((set, get) => ({
   myBookings: [],
   adminBookings: [],
@@ -78,7 +90,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('id, user_id, status, notes, created_at, updated_at')
+        .select(bookingSelect)
         .eq('user_id', userId)
         .in('status', ['pending', 'confirmed', 'cancelled'])
         .order('created_at', { ascending: false });
@@ -100,16 +112,27 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const userId = await getAuthedUserId();
-      console.log('[bookingStore] createBooking', { userId, notesLen: payload.notes.length });
+      console.log('[bookingStore] createBooking', {
+        userId,
+        packageId: payload.packageId,
+        travelers: payload.travelers,
+        preferredStartDate: payload.preferredStartDate,
+        preferredEndDate: payload.preferredEndDate ?? null,
+        customerNotesLen: payload.customerNotes?.length ?? 0,
+      });
 
       const { data, error } = await supabase
         .from('bookings')
         .insert({
           user_id: userId,
           status: 'pending' as const,
-          notes: payload.notes,
+          package_id: payload.packageId,
+          preferred_start_date: payload.preferredStartDate,
+          preferred_end_date: payload.preferredEndDate ?? null,
+          travelers: payload.travelers,
+          customer_notes: payload.customerNotes?.trim() ? payload.customerNotes.trim() : null,
         })
-        .select('id, user_id, status, notes, created_at, updated_at')
+        .select(bookingSelect)
         .single();
 
       if (error) {
@@ -136,7 +159,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
 
       const { data, error } = await supabase
         .from('bookings')
-        .select('id, user_id, status, notes, created_at, updated_at')
+        .select(bookingSelect)
         .in('status', ['pending', 'confirmed', 'cancelled'])
         .order('created_at', { ascending: false });
 
