@@ -191,20 +191,49 @@ export default function ChatScreen() {
 
   const renderMessage = useCallback(
     ({ item }: { item: Message }) => {
-      const isUser = item.senderType === 'user' && item.senderId && item.senderId === user?.id;
+      const isSystem = item.senderType === 'system';
+      const isAdminSender = item.senderType === 'admin';
+
+      const isFromCurrentUser =
+        item.senderType === 'user' &&
+        ((user?.id != null && item.senderId === user.id) || (user == null && item.senderId == null));
+
+      const containerStyle = isFromCurrentUser
+        ? styles.userMessage
+        : isSystem
+          ? styles.systemMessage
+          : styles.adminMessage;
+
+      const textStyle = isFromCurrentUser
+        ? styles.userMessageText
+        : isSystem
+          ? styles.systemMessageText
+          : styles.adminMessageText;
+
+      const timeStyle = isFromCurrentUser
+        ? styles.userTimeText
+        : isSystem
+          ? styles.systemTimeText
+          : styles.adminTimeText;
+
+      const badgeText = isSystem ? 'SYSTEM' : isAdminSender ? 'ADMIN' : null;
 
       return (
-        <View style={[styles.messageContainer, isUser ? styles.userMessage : styles.adminMessage]}>
-          <Text style={[styles.messageText, isUser ? styles.userMessageText : styles.adminMessageText]}>
-            {item.body}
-          </Text>
-          <Text style={[styles.timeText, isUser ? styles.userTimeText : styles.adminTimeText]}>
+        <View style={[styles.messageContainer, containerStyle]} testID={`chat.message.${item.id}`}>
+          {badgeText ? (
+            <View style={styles.senderBadge} testID={`chat.message.badge.${item.id}`}>
+              <Text style={styles.senderBadgeText}>{badgeText}</Text>
+            </View>
+          ) : null}
+
+          <Text style={[styles.messageText, textStyle]}>{item.body}</Text>
+          <Text style={[styles.timeText, timeStyle]}>
             {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
         </View>
       );
     },
-    [user?.id]
+    [user]
   );
 
   if (!conversationId) {
@@ -348,6 +377,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
+  systemMessage: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(212,175,55,0.12)',
+    borderBottomLeftRadius: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(212,175,55,0.3)',
+  },
   messageText: {
     fontSize: 16,
     marginBottom: 4,
@@ -358,6 +394,10 @@ const styles = StyleSheet.create({
   adminMessageText: {
     color: Colors.text,
   },
+  systemMessageText: {
+    color: Colors.text,
+    fontWeight: '700',
+  },
   timeText: {
     fontSize: 10,
     alignSelf: 'flex-end',
@@ -367,6 +407,9 @@ const styles = StyleSheet.create({
   },
   adminTimeText: {
     color: Colors.textSecondary,
+  },
+  systemTimeText: {
+    color: 'rgba(10, 25, 47, 0.6)',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -400,6 +443,22 @@ const styles = StyleSheet.create({
   },
   inputDisabled: {
     opacity: 0.7,
+  },
+  senderBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginBottom: 8,
+    backgroundColor: 'rgba(10, 25, 47, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(10, 25, 47, 0.14)',
+  },
+  senderBadgeText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
   toast: {
     position: 'absolute',

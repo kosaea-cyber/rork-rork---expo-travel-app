@@ -1,135 +1,103 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import Colors from '@/constants/colors';
-import { supabase } from '@/lib/supabase/client';
 import { useAuthStore } from '@/store/authStore';
-import { useChatStore } from '@/store/chatStore';
+import { type Conversation, useChatStore } from '@/store/chatStore';
 
 type UiState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'admin_list' };
+  | { status: 'ready' };
 
 export default function ChatListScreen() {
   const router = useRouter();
+  const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore((s) => s.isAdmin);
 
-  const { conversations, getPublicConversation } = useChatStore();
+  const { conversations, getPublicConversation, getOrCreatePrivateConversation, subscribeToConversation } = useChatStore();
 
   const [ui, setUi] = useState<UiState>({ status: 'loading' });
+  const [conversationIds, setConversationIds] = useState<string[]>([]);
 
-  const openChat = useCallback(async () => {
+  const load = useCallback(async () => {
     setUi({ status: 'loading' });
 
     try {
-      const { data: sessionRes, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) {
-        console.error('[chat] error', sessionError);
-      }
+      console.log('[chat:list] load', { hasUser: Boolean(user), isAdmin });
 
-      const session = sessionRes.session ?? null;
-      console.log('[chat] session?', !!session);
+      const ids: string[] = [];
 
-      if (!session) {
-        const { data, error } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('type', 'public')
-          .order('created_at', { ascending: true })
-          .limit(1);
-
-        if (error) {
-          console.error('[chat] error', error);
-          setUi({ status: 'error', message: error.message });
-          return;
-        }
-
-        const conversationId = (data?.[0]?.id ?? '') as string;
-        if (!conversationId) {
+      if (isAdmin) {
+        const conv = await getPublicConversation();
+        if (!conv?.id) {
           setUi({ status: 'error', message: 'Public chat is not configured yet. Please contact support.' });
           return;
         }
-
-        console.log('[chat] conversationId', conversationId);
-        router.replace(`/chat/${conversationId}` as any);
-        return;
+        ids.push(conv.id);
+      } else {
+        if (user) {
+          const conv = await getOrCreatePrivateConversation();
+          if (!conv?.id) {
+            setUi({ status: 'error', message: 'Could not load your messages. Please try again.' });
+            return;
+          }
+          ids.push(conv.id);
+        } else {
+          const conv = await getPublicConversation();
+          if (!conv?.id) {
+            setUi({ status: 'error', message: 'Public chat is not configured yet. Please contact support.' });
+            return;
+          }
+          ids.push(conv.id);
+        }
       }
 
-      const userId = session.user.id;
-
-      const { data: existing, error: existingError } = await supabase
-        .from('conversations')
-        .select('id')
-        .eq('type', 'private')
-        .eq('customer_id', userId)
-        .limit(1);
-
-      if (existingError) {
-        console.error('[chat] error', existingError);
-        setUi({ status: 'error', message: existingError.message });
-        return;
-      }
-
-      const existingId = (existing?.[0]?.id ?? '') as string;
-
-      if (existingId) {
-        console.log('[chat] conversationId', existingId);
-        router.replace(`/chat/${existingId}` as any);
-        return;
-      }
-
-      const { data: inserted, error: insertError } = await supabase
-        .from('conversations')
-        .insert({ type: 'private', customer_id: userId })
-        .select('id')
-        .single();
-
-      if (insertError) {
-        console.error('[chat] error', insertError);
-        setUi({ status: 'error', message: insertError.message });
-        return;
-      }
-
-      const conversationId = (inserted?.id ?? '') as string;
-      if (!conversationId) {
-        setUi({ status: 'error', message: 'Failed to create a conversation. Please try again.' });
-        return;
-      }
-
-      console.log('[chat] conversationId', conversationId);
-      router.replace(`/chat/${conversationId}` as any);
+      setConversationIds(ids);
+      setUi({ status: 'ready' });
     } catch (e) {
-      console.error('[chat] error', e);
-      setUi({ status: 'error', message: e instanceof Error ? e.message : 'Unexpected error' });
+      const msg = e instanceof Error ? e.message : 'Unexpected error';
+      console.error('[chat:list] load failed', { msg, e });
+      setUi({ status: 'error', message: msg });
     }
-  }, [router]);
+  }, [getOrCreatePrivateConversation, getPublicConversation, isAdmin, user]);
 
   useEffect(() => {
-    if (isAdmin) {
-      setUi({ status: 'admin_list' });
-      void getPublicConversation();
-      return;
-    }
+    void load();
+  }, [load]);
 
-    void openChat();
-  }, [getPublicConversation, isAdmin, openChat]);
+  useEffect(() => {
+    if (conversationIds.length === 0) return;
 
-  const adminListData = useMemo(() => conversations, [conversations]);
+    const unsubs = conversationIds.map((id) => subscribeToConversation(id));
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, [conversationIds, subscribeToConversation]);
 
-  if (ui.status === 'admin_list') {
+  const data = useMemo<Conversation[]>(() => {
+    const map = new Map(conversations.map((c) => [c.id, c] as const));
+    return conversationIds
+      .map((id) => map.get(id))
+      .filter((c): c is Conversation => Boolean(c))
+      .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
+  }, [conversationIds, conversations]);
+
+  const openConversation = useCallback(
+    (conversationId: string) => {
+      router.push(`/chat/${conversationId}` as any);
+    },
+    [router]
+  );
+
+  if (ui.status === 'loading') {
     return (
       <View style={styles.container}>
-        {adminListData.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>No messages yet.</Text>
-          </View>
-        ) : (
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyText}>Open messages from Admin → Messages.</Text>
-          </View>
-        )}
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator color={Colors.tint} />
+          <Text style={styles.emptyText}>Loading messages…</Text>
+        </View>
       </View>
     );
   }
@@ -140,8 +108,8 @@ export default function ChatListScreen() {
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>{ui.message}</Text>
           <Pressable
-            testID="chat.open.retry"
-            onPress={openChat}
+            testID="chat.list.retry"
+            onPress={load}
             style={({ pressed }) => [styles.retryButton, pressed && { opacity: 0.9 }]}
           >
             <Text style={styles.retryButtonText}>Retry</Text>
@@ -153,10 +121,42 @@ export default function ChatListScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.emptyContainer}>
-        <ActivityIndicator color={Colors.tint} />
-        <Text style={styles.emptyText}>Opening chat…</Text>
-      </View>
+      <FlatList
+        data={data}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        renderItem={({ item }) => {
+          const title = item.type === 'public' ? 'Public chat' : 'Support';
+          const preview = item.lastMessagePreview ?? 'No messages yet.';
+
+          return (
+            <Pressable
+              testID={`chat.list.item.${item.id}`}
+              onPress={() => openConversation(item.id)}
+              style={({ pressed }) => [styles.item, pressed && { opacity: 0.9 }]}
+            >
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{title.slice(0, 1).toUpperCase()}</Text>
+              </View>
+
+              <View style={styles.content}>
+                <View style={styles.header}>
+                  <Text style={styles.subject} numberOfLines={1}>
+                    {title}
+                  </Text>
+                  <Text style={styles.time}>
+                    {new Date(item.lastMessageAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
+                <Text style={styles.preview} numberOfLines={1}>
+                  {preview}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        }}
+      />
     </View>
   );
 }
