@@ -15,39 +15,73 @@ import { useRouter } from 'expo-router';
 import { CheckCircle2, UserRound, XCircle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { type BookingRow, useBookingStore } from '@/store/bookingStore';
+import { useI18nStore } from '@/constants/i18n';
 import { supabase } from '@/lib/supabase/client';
 
-type ProfileLite = { id: string; full_name?: string | null; name?: string | null; email?: string | null };
+type ProfileLite = { full_name?: string | null; name?: string | null; email?: string | null };
+
+type PackageLite = { title_en?: string | null; title_ar?: string | null; title_de?: string | null };
+
+type BookingAdminListRow = Pick<
+  BookingRow,
+  | 'id'
+  | 'status'
+  | 'travelers'
+  | 'preferred_start_date'
+  | 'preferred_end_date'
+  | 'created_at'
+  | 'user_id'
+  | 'package_id'
+> & {
+  profiles?: ProfileLite | null;
+  packages?: PackageLite | null;
+};
 
 type Snack = { type: 'success' | 'error'; message: string } | null;
 
-function extractPreferredStartDate(notes: string | null): string | null {
-  if (!notes) return null;
-  const m = notes.match(/Preferred start date:\s*(.+)/i);
-  const raw = m?.[1]?.trim() ?? '';
-  return raw ? raw : null;
-}
-
-function formatCustomerLabel(p: ProfileLite | null, userId: string): string {
+function formatCustomerLabel(p: ProfileLite | null | undefined, userId: string): string {
   const name = (p?.full_name ?? p?.name ?? '').trim();
   const email = (p?.email ?? '').trim();
-  if (name && email) return `${name} · ${email}`;
   if (name) return name;
   if (email) return email;
   return userId;
 }
 
+function shortId(id: string): string {
+  const cleaned = (id ?? '').trim();
+  return cleaned.length > 10 ? `${cleaned.slice(0, 8)}…${cleaned.slice(-4)}` : cleaned;
+}
+
+function formatDateRange(start: string | null, end: string | null): string {
+  const s = (start ?? '').trim();
+  const e = (end ?? '').trim();
+  if (!s) return '—';
+  const endSafe = e || s;
+  return `${s} → ${endSafe}`;
+}
+
+function getPackageTitle(p: PackageLite | null | undefined, lang: 'en' | 'ar' | 'de'): string {
+  const byLang = (lang === 'ar' ? p?.title_ar : lang === 'de' ? p?.title_de : p?.title_en) ?? null;
+  const localized = (byLang ?? '').trim();
+  const fallback = (p?.title_en ?? '').trim();
+  return localized || fallback;
+}
+
 export default function BookingsPage() {
   const router = useRouter();
+  const language = useI18nStore((s) => s.language);
   const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed' | 'cancelled'>('all');
 
-  const adminBookings = useBookingStore((s) => s.adminBookings);
-  const isLoading = useBookingStore((s) => s.isLoading);
-  const error = useBookingStore((s) => s.error);
+  const storeIsLoading = useBookingStore((s) => s.isLoading);
+  const storeError = useBookingStore((s) => s.error);
   const fetchAllBookingsForAdmin = useBookingStore((s) => s.fetchAllBookingsForAdmin);
   const updateBookingStatusAdmin = useBookingStore((s) => s.updateBookingStatusAdmin);
+  const adminBookings = useBookingStore((s) => s.adminBookings);
 
-  const [profilesById, setProfilesById] = useState<Record<string, ProfileLite>>({});
+  const [rows, setRows] = useState<BookingAdminListRow[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [actionBookingId, setActionBookingId] = useState<string | null>(null);
 
   const [snack, setSnack] = useState<Snack>(null);
@@ -74,45 +108,88 @@ export default function BookingsPage() {
     [snackAnim],
   );
 
-  useEffect(() => {
-    fetchAllBookingsForAdmin();
-  }, [fetchAllBookingsForAdmin]);
+  const loadBookingsWithJoins = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
 
-  useEffect(() => {
-    const run = async () => {
-      const ids = Array.from(new Set(adminBookings.map((b) => b.user_id).filter(Boolean)));
-      const missing = ids.filter((id) => !profilesById[id]);
-      if (missing.length === 0) return;
+    try {
+      console.log('[admin/bookings] loading bookings with joins');
 
-      try {
-        console.log('[admin/bookings] loading customer profiles', { count: missing.length });
-        const { data, error: profilesError } = await supabase
-          .from('profiles')
-          .select('id, full_name, name, email')
-          .in('id', missing)
-          .limit(200);
+      const joinSelect =
+        'id, status, travelers, preferred_start_date, preferred_end_date, created_at, user_id, package_id, profiles(full_name, name, email), packages(title_en, title_ar, title_de)';
 
-        if (profilesError) {
-          console.log('[admin/bookings] profiles load failed', profilesError.message);
-          return;
+      const res = await supabase
+        .from('bookings')
+        .select(joinSelect)
+        .in('status', ['pending', 'confirmed', 'cancelled'])
+        .order('created_at', { ascending: false });
+
+      console.log('[admin/bookings] join query response', {
+        error: res.error?.message ?? null,
+        rows: res.data?.length ?? 0,
+      });
+
+      if (res.error) {
+        console.log('[admin/bookings] join query failed; falling back to store fetch', res.error.message);
+
+        await fetchAllBookingsForAdmin();
+        const fallback = adminBookings.map((b) => ({
+          id: b.id,
+          status: b.status,
+          travelers: b.travelers,
+          preferred_start_date: b.preferred_start_date,
+          preferred_end_date: b.preferred_end_date,
+          created_at: b.created_at,
+          user_id: b.user_id,
+          package_id: b.package_id,
+          profiles: null,
+          packages: null,
+        }));
+
+        setRows(fallback);
+
+        if (storeError?.message) {
+          setError(storeError.message);
         }
 
-        const next: Record<string, ProfileLite> = { ...profilesById };
-        (data ?? []).forEach((p) => {
-          if (p?.id) next[String(p.id)] = p as ProfileLite;
-        });
-        setProfilesById(next);
-      } catch (e) {
-        console.log('[admin/bookings] profiles load exception', e);
+        return;
       }
-    };
 
-    run();
-  }, [adminBookings, profilesById]);
+      setRows((res.data ?? []) as BookingAdminListRow[]);
+    } catch (e) {
+      console.log('[admin/bookings] loadBookingsWithJoins exception', e);
+      setError('Failed to load bookings.');
+
+      try {
+        await fetchAllBookingsForAdmin();
+        const fallback = adminBookings.map((b) => ({
+          id: b.id,
+          status: b.status,
+          travelers: b.travelers,
+          preferred_start_date: b.preferred_start_date,
+          preferred_end_date: b.preferred_end_date,
+          created_at: b.created_at,
+          user_id: b.user_id,
+          package_id: b.package_id,
+          profiles: null,
+          packages: null,
+        }));
+        setRows(fallback);
+      } catch {
+        // ignore
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [adminBookings, fetchAllBookingsForAdmin, storeError?.message]);
+
+  useEffect(() => {
+    loadBookingsWithJoins();
+  }, [loadBookingsWithJoins]);
 
   const filtered = useMemo(() => {
-    return adminBookings.filter((b) => (filter === 'all' ? true : b.status === filter));
-  }, [adminBookings, filter]);
+    return rows.filter((b) => (filter === 'all' ? true : b.status === filter));
+  }, [rows, filter]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -137,7 +214,7 @@ export default function BookingsPage() {
           return;
         }
 
-        await fetchAllBookingsForAdmin();
+        await loadBookingsWithJoins();
         showSnack({
           type: 'success',
           message: nextStatus === 'confirmed' ? 'Booking confirmed.' : 'Booking cancelled.',
@@ -149,13 +226,16 @@ export default function BookingsPage() {
         setActionBookingId(null);
       }
     },
-    [fetchAllBookingsForAdmin, showSnack, updateBookingStatusAdmin],
+    [loadBookingsWithJoins, showSnack, updateBookingStatusAdmin],
   );
 
-  const renderItem = ({ item }: { item: BookingRow }) => {
+  const renderItem = ({ item }: { item: BookingAdminListRow }) => {
     const statusColor = getStatusColor(item.status);
-    const preferred = extractPreferredStartDate(item.notes);
-    const customer = formatCustomerLabel(profilesById[item.user_id] ?? null, item.user_id);
+
+    const customer = formatCustomerLabel(item.profiles ?? null, item.user_id);
+    const packageTitle = getPackageTitle(item.packages ?? null, language) || item.package_id || '—';
+
+    const dateRange = formatDateRange(item.preferred_start_date, item.preferred_end_date);
 
     const isActionLoading = actionBookingId === item.id;
     const canUpdate = item.status === 'pending';
@@ -170,7 +250,7 @@ export default function BookingsPage() {
         <View style={styles.tableRow}>
           <View style={[styles.cell, styles.colId]}>
             <Text style={styles.mono} numberOfLines={1}>
-              {item.id}
+              {shortId(item.id)}
             </Text>
           </View>
 
@@ -183,9 +263,20 @@ export default function BookingsPage() {
             </View>
           </View>
 
-          <View style={[styles.cell, styles.colCreated]}>
+          <View style={[styles.cell, styles.colPackage]}>
             <Text style={styles.cellText} numberOfLines={1}>
-              {new Date(item.created_at).toLocaleString()}
+              {packageTitle}
+            </Text>
+            {!item.packages && item.package_id ? (
+              <Text style={styles.subtleMono} numberOfLines={1}>
+                {item.package_id}
+              </Text>
+            ) : null}
+          </View>
+
+          <View style={[styles.cell, styles.colDates]}>
+            <Text style={styles.cellText} numberOfLines={1}>
+              {dateRange}
             </Text>
           </View>
 
@@ -193,18 +284,6 @@ export default function BookingsPage() {
             <View style={[styles.badge, { backgroundColor: statusColor + '1A', borderColor: statusColor + '55' }]}>
               <Text style={[styles.badgeText, { color: statusColor }]}>{item.status}</Text>
             </View>
-          </View>
-
-          <View style={[styles.cell, styles.colDateTime]}>
-            <Text style={styles.cellText} numberOfLines={1}>
-              {preferred ?? '—'}
-            </Text>
-          </View>
-
-          <View style={[styles.cell, styles.colNotes]}>
-            <Text style={styles.cellText} numberOfLines={2}>
-              {(item.notes ?? '').trim() ? item.notes : '—'}
-            </Text>
           </View>
 
           <View style={[styles.cell, styles.colActions]}>
@@ -241,12 +320,11 @@ export default function BookingsPage() {
 
   const headerRow = (
     <View style={styles.headerRow}>
-      <Text style={[styles.headerCell, styles.colId]}>Booking ID</Text>
+      <Text style={[styles.headerCell, styles.colId]}>Booking</Text>
       <Text style={[styles.headerCell, styles.colCustomer]}>Customer</Text>
-      <Text style={[styles.headerCell, styles.colCreated]}>Created</Text>
+      <Text style={[styles.headerCell, styles.colPackage]}>Package</Text>
+      <Text style={[styles.headerCell, styles.colDates]}>Dates</Text>
       <Text style={[styles.headerCell, styles.colStatus]}>Status</Text>
-      <Text style={[styles.headerCell, styles.colDateTime]}>Date/Time</Text>
-      <Text style={[styles.headerCell, styles.colNotes]}>Notes</Text>
       <Text style={[styles.headerCell, styles.colActions]}>Actions</Text>
     </View>
   );
@@ -258,7 +336,11 @@ export default function BookingsPage() {
       keyExtractor={(item) => item.id}
       contentContainerStyle={styles.list}
       refreshControl={
-        <RefreshControl refreshing={isLoading} onRefresh={() => fetchAllBookingsForAdmin()} tintColor={Colors.tint} />
+        <RefreshControl
+          refreshing={isLoading || storeIsLoading}
+          onRefresh={() => loadBookingsWithJoins()}
+          tintColor={Colors.tint}
+        />
       }
       ListHeaderComponent={headerRow}
       stickyHeaderIndices={Platform.OS === 'web' ? undefined : [0]}
@@ -273,7 +355,7 @@ export default function BookingsPage() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Bookings</Text>
+        <Text style={styles.title}>Manage Bookings</Text>
       </View>
 
       <View style={styles.tabs}>
@@ -286,23 +368,19 @@ export default function BookingsPage() {
         ))}
       </View>
 
-      {isLoading && adminBookings.length === 0 ? (
+      {isLoading && rows.length === 0 ? (
         <ActivityIndicator size="large" color={Colors.tint} style={{ marginTop: 50 }} testID="adminBookingsLoading" />
-      ) : error ? (
+      ) : error || storeError ? (
         <View style={styles.empty} testID="adminBookingsError">
           <Text style={styles.emptyText}>Failed to load bookings.</Text>
-          <Text style={[styles.emptyText, { marginTop: 6, fontSize: 12 }]}>{error.message}</Text>
-          <TouchableOpacity
-            style={[styles.tab, { marginTop: 16 }]}
-            onPress={() => fetchAllBookingsForAdmin()}
-            testID="adminBookingsRetry"
-          >
+          <Text style={[styles.emptyText, { marginTop: 6, fontSize: 12 }]}>{error ?? storeError?.message}</Text>
+          <TouchableOpacity style={[styles.tab, { marginTop: 16 }]} onPress={loadBookingsWithJoins} testID="adminBookingsRetry">
             <Text style={styles.tabText}>Retry</Text>
           </TouchableOpacity>
         </View>
       ) : Platform.OS === 'web' ? (
         <ScrollView horizontal contentContainerStyle={styles.webTableWrap} showsHorizontalScrollIndicator={false}>
-          <View style={{ minWidth: 1180 }}>{list}</View>
+          <View style={{ minWidth: 980 }}>{list}</View>
         </ScrollView>
       ) : (
         list
@@ -417,16 +495,22 @@ const styles = StyleSheet.create({
   cell: {
     paddingRight: 10,
   },
-  colId: { width: 210 },
+  colId: { width: 120 },
   colCustomer: { width: 240 },
-  colCreated: { width: 170 },
+  colPackage: { width: 240 },
+  colDates: { width: 170 },
   colStatus: { width: 110 },
-  colDateTime: { width: 150 },
-  colNotes: { width: 320 },
   colActions: { width: 190, paddingRight: 0 },
   mono: {
     fontSize: 12,
     color: Colors.text,
+    fontWeight: '800',
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+  },
+  subtleMono: {
+    marginTop: 2,
+    fontSize: 10,
+    color: Colors.textSecondary,
     fontWeight: '700',
     fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
   },
@@ -434,7 +518,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 12,
     lineHeight: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   customerRow: {
     flexDirection: 'row',
@@ -445,7 +529,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: Colors.text,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   badge: {
     alignSelf: 'flex-start',
