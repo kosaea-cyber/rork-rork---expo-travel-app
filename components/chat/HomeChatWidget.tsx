@@ -18,7 +18,7 @@ import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
 import { useAuthStore } from '@/store/authStore';
-import type { Conversation, Message } from '@/store/chatStore';
+import type { Conversation, Message, SendMode } from '@/store/chatStore';
 import { useChatStore } from '@/store/chatStore';
 
 type UiMessage = Message;
@@ -54,6 +54,7 @@ export default function HomeChatWidget() {
     realtimeHealthByConversationId,
     realtimeErrorByConversationId,
 
+    getPublicConversation,
     getOrCreatePrivateConversation,
     fetchMessages,
     subscribeToConversation,
@@ -69,8 +70,10 @@ export default function HomeChatWidget() {
     setTimeout(() => setToast(''), 1600);
   }, []);
 
-  const publicBannerText = useMemo(() => {
-    if (!conversation || conversation.type !== 'public') return null;
+  const systemBannerText = useMemo(() => {
+    if (!conversation) return null;
+    // show banner for public chat only
+    if (conversation.type !== 'public') return null;
     return resolveAutoReplyText({ categoryKey: 'general', preferredLanguage: language });
   }, [conversation, language]);
 
@@ -115,37 +118,38 @@ export default function HomeChatWidget() {
     try {
       console.log('[HomeChatWidget] bootstrap');
 
-      // ✅ Guest mode: anonymous auth is disabled, so we don't attempt signInAnonymously.
-      // For now, we show a clear message until guest conversations are wired via Edge Functions.
-      if (!user) {
-        console.log('[HomeChatWidget] guest open (anonymous auth disabled)');
+      let conv: Conversation | null = null;
 
-        setConversation(null);
-        setIsBootstrapping(false);
-        setLocalError('Guest chat is not configured yet. Please sign in to chat for now.');
-        return;
+      if (user) {
+        // ✅ Signed-in: private conversation (owned by the user)
+        conv = await getOrCreatePrivateConversation();
+      } else {
+        // ✅ Guest (no anonymous auth): use PUBLIC conversation + guest send mode (x-guest-id)
+        conv = await getPublicConversation();
       }
 
-      console.log('[HomeChatWidget] signed-in open -> private conversation');
-
-      const conv = await getOrCreatePrivateConversation();
       if (!conv) {
         const storeErrUnknown: unknown = useChatStore.getState().error;
         const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
 
+        setConversation(null);
+        setIsBootstrapping(false);
         setLocalError(
           storeErr && storeErr.trim().length > 0
             ? storeErr
-            : 'Chat is not configured yet. Please contact support.'
+            : user
+              ? 'Chat is not configured yet. Please try again.'
+              : 'Public chat is not configured yet. Admin must create it first.'
         );
-
-        setConversation(null);
-        setIsBootstrapping(false);
         return;
       }
 
       setConversation(conv);
+
+      // Fetch messages (may require RLS policies to allow read for public chat)
       await fetchMessages(conv.id, 30);
+
+      // Mark read (non-fatal)
       void markConversationReadForUser(conv.id);
 
       setIsBootstrapping(false);
@@ -155,15 +159,15 @@ export default function HomeChatWidget() {
       });
     } catch (e) {
       console.error('[HomeChatWidget] bootstrap failed', e);
+
       const storeErrUnknown: unknown = useChatStore.getState().error;
       const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
 
-      setLocalError(
-        storeErr && storeErr.trim().length > 0 ? storeErr : 'Chat is temporarily unavailable. Please try again.'
-      );
+      setConversation(null);
+      setLocalError(storeErr && storeErr.trim().length > 0 ? storeErr : 'Chat is temporarily unavailable.');
       setIsBootstrapping(false);
     }
-  }, [fetchMessages, getOrCreatePrivateConversation, markConversationReadForUser, user]);
+  }, [fetchMessages, getOrCreatePrivateConversation, getPublicConversation, markConversationReadForUser, user]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -226,15 +230,22 @@ export default function HomeChatWidget() {
     }
   }, [conversation?.id, fetchMessages, messages]);
 
+  const computedMode: SendMode = useMemo(() => {
+    if (!conversation) return 'public_guest';
+    if (conversation.type === 'public') return user ? 'public_auth' : 'public_guest';
+    return 'private_user';
+  }, [conversation, user]);
+
+  const canSend = useMemo(() => {
+    if (!conversation?.id) return false;
+    // We allow sending as guest only for public chat (edge function supports it)
+    if (conversation.type === 'public') return Boolean(draft.trim());
+    // Private requires signed-in user
+    return Boolean(user && draft.trim());
+  }, [conversation?.id, conversation?.type, draft, user]);
+
   const onSend = useCallback(async () => {
     const convId = conversation?.id;
-
-    // ✅ If guest, we do not allow sending yet (until guest chat is implemented properly).
-    if (!user) {
-      showToast('Please sign in to send messages (guest chat coming soon).');
-      return;
-    }
-
     if (!convId) {
       setLocalError('Chat is not ready yet.');
       return;
@@ -243,7 +254,11 @@ export default function HomeChatWidget() {
     const trimmed = draft.trim();
     if (!trimmed) return;
 
-    const mode: 'public_auth' | 'public_guest' | 'private_user' = 'private_user';
+    // If private chat and not signed in -> block
+    if (conversation?.type !== 'public' && !user) {
+      showToast('Please sign in to send messages.');
+      return;
+    }
 
     const now = Date.now();
     if (now - lastSendAtRef.current < 3000) {
@@ -255,12 +270,12 @@ export default function HomeChatWidget() {
     setDraft('');
     setLocalError(null);
 
-    const sent = await sendMessage(convId, trimmed, mode);
+    const sent = await sendMessage(convId, trimmed, computedMode);
     if (!sent) {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
     }
-  }, [conversation?.id, draft, sendMessage, showToast, user]);
+  }, [computedMode, conversation?.id, conversation?.type, draft, sendMessage, showToast, user]);
 
   const effectiveError = localError ?? error;
   const showLoading = isBootstrapping || isLoading;
@@ -333,8 +348,9 @@ export default function HomeChatWidget() {
                   <Text style={styles.sheetTitle} testID="homeChatWidgetTitle">
                     Chat
                   </Text>
+
                   <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestLabel">
-                    {user ? 'Signed in' : 'Guest'}
+                    {user ? 'Signed in' : 'Guest'} • {conversation?.type === 'public' ? 'Public' : 'Support'}
                   </Text>
 
                   {realtimeHealth === 'error' ? (
@@ -375,9 +391,9 @@ export default function HomeChatWidget() {
               ) : null}
 
               <View style={styles.messagesWrap}>
-                {publicBannerText ? (
+                {systemBannerText ? (
                   <View style={styles.systemBanner} testID="homeChatWidget.publicBanner">
-                    <Text style={styles.systemBannerText}>{publicBannerText}</Text>
+                    <Text style={styles.systemBannerText}>{systemBannerText}</Text>
                   </View>
                 ) : null}
 
@@ -424,7 +440,7 @@ export default function HomeChatWidget() {
                     value={draft}
                     onChangeText={setDraft}
                     editable
-                    placeholder={'Write a message…'}
+                    placeholder={conversation?.type !== 'public' && !user ? 'Sign in to message…' : 'Write a message…'}
                     placeholderTextColor={Colors.textSecondary}
                     style={styles.input}
                     multiline
@@ -434,11 +450,11 @@ export default function HomeChatWidget() {
 
                 <Pressable
                   onPress={onSend}
-                  disabled={!draft.trim() || !conversation?.id}
+                  disabled={!canSend}
                   style={({ pressed }) => [
                     styles.sendButton,
-                    (!draft.trim() || !conversation?.id) && styles.sendButtonDisabled,
-                    pressed && styles.sendButtonPressed,
+                    !canSend && styles.sendButtonDisabled,
+                    pressed && canSend ? styles.sendButtonPressed : null,
                   ]}
                   testID="homeChatWidgetSendButton"
                 >
