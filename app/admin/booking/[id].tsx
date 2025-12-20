@@ -1,20 +1,77 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Animated,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, CheckCircle, XCircle } from 'lucide-react-native';
+import { ArrowLeft, CheckCircle2, UserRound, XCircle } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 import { type BookingRow, type BookingStatus, useBookingStore } from '@/store/bookingStore';
+
+type ProfileLite = { id: string; full_name?: string | null; name?: string | null; email?: string | null };
+
+type Snack = { type: 'success' | 'error'; message: string } | null;
+
+function extractPreferredStartDate(notes: string | null): string | null {
+  if (!notes) return null;
+  const m = notes.match(/Preferred start date:\s*(.+)/i);
+  const raw = m?.[1]?.trim() ?? '';
+  return raw ? raw : null;
+}
+
+function formatCustomerLabel(p: ProfileLite | null, userId: string): string {
+  const name = (p?.full_name ?? p?.name ?? '').trim();
+  const email = (p?.email ?? '').trim();
+  if (name && email) return `${name} · ${email}`;
+  if (name) return name;
+  if (email) return email;
+  return userId;
+}
 
 export default function BookingDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
   const updateBookingStatusAdmin = useBookingStore((s) => s.updateBookingStatusAdmin);
+  const fetchAllBookingsForAdmin = useBookingStore((s) => s.fetchAllBookingsForAdmin);
 
   const [booking, setBooking] = useState<BookingRow | null>(null);
+  const [profile, setProfile] = useState<ProfileLite | null>(null);
+
   const [loading, setLoading] = useState<boolean>(true);
+  const [actionLoading, setActionLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [snack, setSnack] = useState<Snack>(null);
+  const snackAnim = useRef<Animated.Value>(new Animated.Value(0)).current;
+
+  const showSnack = useCallback(
+    (next: Snack) => {
+      setSnack(next);
+      snackAnim.setValue(0);
+      Animated.timing(snackAnim, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }).start();
+
+      setTimeout(() => {
+        Animated.timing(snackAnim, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: true,
+        }).start(() => setSnack(null));
+      }, 2200);
+    },
+    [snackAnim],
+  );
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -23,24 +80,40 @@ export default function BookingDetail() {
 
     try {
       console.log('[admin/booking] load booking', { id });
-      const { data, error } = await supabase
+      const { data, error: bookingError } = await supabase
         .from('bookings')
         .select('id, user_id, status, notes, created_at, updated_at')
         .eq('id', id)
         .maybeSingle();
 
-      if (error) {
-        console.error('[admin/booking] select error', error.message);
-        throw new Error(error.message);
+      if (bookingError) {
+        console.error('[admin/booking] select error', bookingError.message);
+        throw new Error(bookingError.message);
       }
 
       if (!data) {
         setBooking(null);
+        setProfile(null);
         setLoading(false);
         return;
       }
 
-      setBooking(data as BookingRow);
+      const row = data as BookingRow;
+      setBooking(row);
+
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, full_name, name, email')
+        .eq('id', row.user_id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.log('[admin/booking] profile load failed', profileError.message);
+        setProfile(null);
+      } else {
+        setProfile((profileData as ProfileLite | null) ?? null);
+      }
+
       setLoading(false);
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unknown error';
@@ -53,8 +126,7 @@ export default function BookingDetail() {
     loadData();
   }, [loadData]);
 
-  const canConfirm = useMemo(() => booking?.status === 'pending', [booking?.status]);
-  const canComplete = useMemo(() => booking?.status === 'confirmed', [booking?.status]);
+  const canUpdate = useMemo(() => booking?.status === 'pending', [booking?.status]);
 
   const updateStatus = useCallback(
     async (status: BookingStatus) => {
@@ -66,14 +138,24 @@ export default function BookingDetail() {
           text: 'Update',
           style: 'destructive',
           onPress: async () => {
-            const updated = await updateBookingStatusAdmin(booking.id, status);
-            if (!updated) return;
-            setBooking(updated);
+            setActionLoading(true);
+            try {
+              const updated = await updateBookingStatusAdmin(booking.id, status);
+              if (!updated) {
+                showSnack({ type: 'error', message: 'Failed to update booking status.' });
+                return;
+              }
+              setBooking(updated);
+              await fetchAllBookingsForAdmin();
+              showSnack({ type: 'success', message: status === 'confirmed' ? 'Booking confirmed.' : 'Booking cancelled.' });
+            } finally {
+              setActionLoading(false);
+            }
           },
         },
       ]);
     },
-    [booking, updateBookingStatusAdmin],
+    [booking, fetchAllBookingsForAdmin, showSnack, updateBookingStatusAdmin],
   );
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.tint} /></View>;
@@ -82,97 +164,139 @@ export default function BookingDetail() {
       <View style={styles.center} testID="adminBookingError">
         <Text style={{ color: Colors.text, fontWeight: '700' }}>Failed to load booking</Text>
         <Text style={{ color: Colors.textSecondary, marginTop: 6 }}>{error}</Text>
-        <TouchableOpacity style={[styles.btn, styles.btnComplete, { marginTop: 16 }]} onPress={() => loadData()} testID="adminBookingRetry">
-          <Text style={styles.btnText}>Retry</Text>
+        <TouchableOpacity style={[styles.retryBtn, { marginTop: 16 }]} onPress={() => loadData()} testID="adminBookingRetry">
+          <Text style={styles.retryBtnText}>Retry</Text>
         </TouchableOpacity>
       </View>
     );
   }
   if (!booking) return <View style={styles.center}><Text style={{ color: Colors.text }}>Booking not found</Text></View>;
 
+  const statusColor = booking.status === 'confirmed' ? '#16A34A' : booking.status === 'cancelled' ? '#DC2626' : '#F59E0B';
+  const preferred = extractPreferredStartDate(booking.notes);
+  const customer = formatCustomerLabel(profile, booking.user_id);
+
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <ArrowLeft color="white" size={24} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Booking #{booking.id.slice(0, 8)}</Text>
-      </View>
-
-      <View style={styles.content}>
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Status</Text>
-          <View style={styles.statusRow}>
-            <View
-              style={[
-                styles.badge,
-                {
-                  backgroundColor:
-                    booking.status === 'confirmed'
-                      ? '#4CAF50'
-                      : booking.status === 'cancelled'
-                        ? '#F44336'
-                        : booking.status === 'pending'
-                          ? '#FF9800'
-                          : '#9E9E9E',
-                },
-              ]}
-            >
-              <Text style={styles.badgeText}>{booking.status}</Text>
-            </View>
-
-            <View style={styles.actions}>
-              {canConfirm ? (
-                <>
-                  <TouchableOpacity style={[styles.btn, styles.btnConfirm]} onPress={() => updateStatus('confirmed')} testID="adminBookingConfirm">
-                    <CheckCircle size={16} color="white" />
-                    <Text style={styles.btnText}>Confirm</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={() => updateStatus('cancelled')} testID="adminBookingCancel">
-                    <XCircle size={16} color="white" />
-                    <Text style={styles.btnText}>Cancel</Text>
-                  </TouchableOpacity>
-                </>
-              ) : null}
-
-              {canComplete ? (
-                <TouchableOpacity style={[styles.btn, styles.btnConfirm]} onPress={() => updateStatus('confirmed')} testID="adminBookingConfirm2">
-                  <CheckCircle size={16} color="white" />
-                  <Text style={styles.btnText}>Complete</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Details</Text>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>User ID</Text>
-            <Text style={styles.detailValue} numberOfLines={1}>
-              {booking.user_id}
+    <View style={styles.container}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton} testID="adminBookingBack">
+            <ArrowLeft color="white" size={24} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              Booking
+            </Text>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {booking.id}
             </Text>
           </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Created</Text>
-            <Text style={styles.detailValue}>{new Date(booking.created_at).toLocaleString()}</Text>
-          </View>
-          {booking.updated_at ? (
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Updated</Text>
-              <Text style={styles.detailValue}>{new Date(booking.updated_at).toLocaleString()}</Text>
-            </View>
-          ) : null}
-
-          {booking.notes?.trim() ? (
-            <View style={styles.notesBox}>
-              <Text style={styles.notesLabel}>Notes</Text>
-              <Text style={styles.notesText}>{booking.notes}</Text>
-            </View>
-          ) : null}
         </View>
-      </View>
-    </ScrollView>
+
+        <View style={styles.content}>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Overview</Text>
+
+            <View style={styles.kvRow}>
+              <Text style={styles.kLabel}>Booking ID</Text>
+              <Text style={styles.kValueMono} numberOfLines={1}>
+                {booking.id}
+              </Text>
+            </View>
+
+            <View style={styles.kvRow}>
+              <Text style={styles.kLabel}>Customer</Text>
+              <View style={styles.customerInline}>
+                <UserRound size={14} color={Colors.textSecondary} />
+                <Text style={styles.kValue} numberOfLines={1}>
+                  {customer}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.kvRow}>
+              <Text style={styles.kLabel}>Created</Text>
+              <Text style={styles.kValue} numberOfLines={1}>
+                {new Date(booking.created_at).toLocaleString()}
+              </Text>
+            </View>
+
+            <View style={styles.kvRow}>
+              <Text style={styles.kLabel}>Status</Text>
+              <View style={[styles.statusPill, { backgroundColor: statusColor + '1A', borderColor: statusColor + '55' }]}>
+                <Text style={[styles.statusText, { color: statusColor }]}>{booking.status}</Text>
+              </View>
+            </View>
+
+            <View style={styles.kvRow}>
+              <Text style={styles.kLabel}>Date/Time</Text>
+              <Text style={styles.kValue} numberOfLines={1}>
+                {preferred ?? '—'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Notes</Text>
+            <Text style={styles.notesText}>{(booking.notes ?? '').trim() ? booking.notes : '—'}</Text>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Actions</Text>
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.actionConfirm, (!canUpdate || actionLoading) && styles.actionDisabled]}
+                disabled={!canUpdate || actionLoading}
+                onPress={() => updateStatus('confirmed')}
+                testID="adminBookingConfirm"
+              >
+                <CheckCircle2 size={16} color="white" />
+                <Text style={styles.actionText}>Confirm</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.actionCancel, (!canUpdate || actionLoading) && styles.actionDisabled]}
+                disabled={!canUpdate || actionLoading}
+                onPress={() => updateStatus('cancelled')}
+                testID="adminBookingCancel"
+              >
+                <XCircle size={16} color="white" />
+                <Text style={styles.actionText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+
+            {actionLoading ? (
+              <View style={{ marginTop: 12, alignItems: 'flex-end' }}>
+                <ActivityIndicator size="small" color={Colors.tint} />
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </ScrollView>
+
+      {snack ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.snack,
+            {
+              opacity: snackAnim,
+              transform: [
+                {
+                  translateY: snackAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+          testID={snack.type === 'success' ? 'adminBookingSnackSuccess' : 'adminBookingSnackError'}
+        >
+          <Text style={styles.snackText}>{snack.message}</Text>
+        </Animated.View>
+      ) : null}
+    </View>
   );
 }
 
@@ -181,10 +305,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 90,
+  },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   header: {
     backgroundColor: Colors.tint,
@@ -192,14 +323,22 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 14,
   },
   backButton: {
-    marginRight: 16,
+    marginRight: 6,
   },
   headerTitle: {
     color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: -0.2,
+  },
+  headerSubtitle: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 2,
   },
   content: {
     padding: 16,
@@ -207,8 +346,10 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: 'white',
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -216,77 +357,127 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 12,
+    fontWeight: '900',
+    color: Colors.textSecondary,
     marginBottom: 12,
-  },
-  statusRow: {
-    gap: 12,
-  },
-  badge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  badgeText: {
-    color: 'white',
-    fontWeight: 'bold',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  actions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-  },
-  btn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    gap: 6,
-  },
-  btnConfirm: { backgroundColor: '#4CAF50' },
-  btnCancel: { backgroundColor: '#F44336' },
-  btnComplete: { backgroundColor: Colors.tint },
-  btnText: { color: 'white', fontWeight: '600', fontSize: 12 },
-  
-  userRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  userName: { fontWeight: '600', fontSize: 16 },
-  userEmail: { color: '#666', fontSize: 14 },
-
-  detailRow: {
+  kvRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    marginBottom: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.06)',
   },
-  detailLabel: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '700',
+  kLabel: {
+    color: Colors.textSecondary,
+    fontWeight: '800',
+    fontSize: 11,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  detailValue: {
+  kValue: {
     flex: 1,
+    color: Colors.text,
+    fontWeight: '800',
+    fontSize: 13,
     textAlign: 'right',
-    color: '#333',
+  },
+  kValueMono: {
+    flex: 1,
+    color: Colors.text,
+    fontWeight: '800',
+    fontSize: 12,
+    textAlign: 'right',
+  },
+  customerInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+    flex: 1,
+  },
+  statusPill: {
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    alignSelf: 'flex-end',
+  },
+  statusText: {
+    fontWeight: '900',
+    fontSize: 11,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  notesText: {
+    color: Colors.text,
     fontWeight: '600',
+    fontSize: 13,
+    lineHeight: 18,
   },
-  notesBox: {
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: '#FFF8E1',
-    borderRadius: 8,
+  actions: {
+    flexDirection: 'row',
+    gap: 10,
   },
-  notesLabel: { fontSize: 12, color: '#F57C00', fontWeight: 'bold', textTransform: 'uppercase' },
-  notesText: { color: '#333', fontSize: 14, marginTop: 4 },
+  actionBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  actionConfirm: {
+    backgroundColor: '#16A34A',
+  },
+  actionCancel: {
+    backgroundColor: '#DC2626',
+  },
+  actionDisabled: {
+    opacity: 0.45,
+  },
+  actionText: {
+    color: 'white',
+    fontWeight: '900',
+    fontSize: 13,
+    letterSpacing: 0.2,
+  },
+  snack: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 14,
+    backgroundColor: '#0F172A',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  snackText: {
+    color: 'white',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  retryBtn: {
+    height: 46,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: 'white',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryBtnText: {
+    color: Colors.text,
+    fontWeight: '900',
+    fontSize: 13,
+  },
 });
