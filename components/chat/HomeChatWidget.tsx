@@ -54,7 +54,7 @@ export default function HomeChatWidget() {
     hasMoreByConversationId,
     realtimeHealthByConversationId,
     realtimeErrorByConversationId,
-    getPublicConversation,
+
     getOrCreatePrivateConversation,
     fetchMessages,
     subscribeToConversation,
@@ -131,11 +131,11 @@ export default function HomeChatWidget() {
             throw anonErr;
           }
         }
-
-        conv = await getOrCreatePrivateConversation();
       } else {
-        conv = await getPublicConversation();
+        console.log('[HomeChatWidget] signed-in open -> private conversation');
       }
+
+      conv = await getOrCreatePrivateConversation();
       if (!conv) {
         const storeErrUnknown: unknown = useChatStore.getState().error;
         const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
@@ -168,7 +168,7 @@ export default function HomeChatWidget() {
       );
       setIsBootstrapping(false);
     }
-  }, [fetchMessages, getOrCreatePrivateConversation, getPublicConversation, markConversationReadForUser, user]);
+  }, [fetchMessages, getOrCreatePrivateConversation, markConversationReadForUser, user]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -241,7 +241,7 @@ export default function HomeChatWidget() {
     const trimmed = draft.trim();
     if (!trimmed) return;
 
-    const mode: 'public_auth' | 'public_guest' | 'private_user' = user ? 'public_auth' : 'private_user';
+    const mode: 'public_auth' | 'public_guest' | 'private_user' = 'private_user';
 
     const now = Date.now();
     if (now - lastSendAtRef.current < 3000) {
@@ -258,7 +258,7 @@ export default function HomeChatWidget() {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
     }
-  }, [conversation?.id, draft, sendMessage, showToast, user]);
+  }, [conversation?.id, draft, sendMessage, showToast]);
 
   const effectiveError = localError ?? error;
   const showLoading = isBootstrapping || isLoading;
