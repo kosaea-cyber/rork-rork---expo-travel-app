@@ -6,9 +6,29 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
+export function getSupabaseProjectRefFromUrl(url: string | null | undefined): string | null {
+  try {
+    if (!url) return null;
+    const u = new URL(url);
+    const host = u.host;
+    const m = host.match(/^([a-z0-9-]+)\.supabase\.co$/i);
+    return m?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 console.log('[supabase] env check', {
   hasUrl: Boolean(supabaseUrl),
   hasAnonKey: Boolean(supabaseAnonKey),
+  urlHost: (() => {
+    try {
+      return supabaseUrl ? new URL(supabaseUrl).host : null;
+    } catch {
+      return null;
+    }
+  })(),
+  projectRef: getSupabaseProjectRefFromUrl(supabaseUrl ?? null),
 });
 
 if (!supabaseUrl || !supabaseAnonKey) {

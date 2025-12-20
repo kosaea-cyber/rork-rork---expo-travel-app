@@ -333,7 +333,22 @@ export const useChatStore = create<ChatState>((set, get) => {
           return null;
         }
 
-        const url = `${baseUrl.replace(/\/$/, '')}/functions/v1/chat-send-message`;
+        const normalizedBase = baseUrl.replace(/\/$/, '');
+        const url = `${normalizedBase}/functions/v1/chat-send-message`;
+
+        console.log('[chatStore] edge function target', {
+          normalizedBase,
+          url,
+          projectRef: (() => {
+            try {
+              const host = new URL(normalizedBase).host;
+              const m = host.match(/^([a-z0-9-]+)\.supabase\.co$/i);
+              return m?.[1] ?? null;
+            } catch {
+              return null;
+            }
+          })(),
+        });
 
         const headers: Record<string, string> = {
           'content-type': 'application/json',
