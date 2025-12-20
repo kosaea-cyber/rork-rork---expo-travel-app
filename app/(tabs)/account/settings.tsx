@@ -10,6 +10,30 @@ export default function SettingsScreen() {
   const { language, setLanguage, t } = useI18nStore();
   const user = useAuthStore((s) => s.user);
 
+  const testAnonymousSignIn = useCallback(async () => {
+    console.log('[settings] testAnonymousSignIn pressed');
+
+    try {
+      const { data, error } = await supabase.auth.signInAnonymously();
+
+      if (error) {
+        console.error('[settings] signInAnonymously error', error);
+        Alert.alert('Anonymous sign-in failed', error.message);
+        return;
+      }
+
+      console.log('[settings] signInAnonymously success', {
+        userId: data.user?.id ?? null,
+        isAnonymous: data.user?.is_anonymous ?? null,
+      });
+
+      Alert.alert('Anonymous sign-in success', `userId: ${data.user?.id ?? 'unknown'}`);
+    } catch (e) {
+      console.error('[settings] signInAnonymously unexpected error', e);
+      Alert.alert('Anonymous sign-in failed', 'Unexpected error. Please try again.');
+    }
+  }, []);
+
   const toggleLanguage = useCallback(
     async (lang: Language) => {
       console.log('[settings] language switch', { lang, hasUser: Boolean(user) });
@@ -67,6 +91,17 @@ export default function SettingsScreen() {
         >
           <Text style={styles.optionText}>Deutsch</Text>
           {language === 'de' && <Check color={Colors.tint} size={20} />}
+        </TouchableOpacity>
+      </View>
+
+      <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Supabase</Text>
+      <View style={styles.card}>
+        <TouchableOpacity
+          style={styles.option}
+          onPress={testAnonymousSignIn}
+          testID="settings-test-anon-signin"
+        >
+          <Text style={styles.optionText}>Test anonymous sign-in</Text>
         </TouchableOpacity>
       </View>
 
