@@ -5,13 +5,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.87.1';
 
 type SendMode = 'public_guest' | 'public_auth' | 'private_user' | 'admin';
-
 type Json = Record<string, unknown>;
 
 type ConversationRow = {
   id: string;
   type: 'public' | 'private';
   customer_id: string | null;
+  guest_id: string | null;
 };
 
 type MessageRow = {
@@ -124,12 +124,13 @@ Deno.serve(async (req: Request) => {
 
   const isProtectedMode = mode === 'public_auth' || mode === 'private_user' || mode === 'admin';
 
+  // For protected modes -> JWT required
   if (isProtectedMode && !token) {
     return jsonResponse(401, { error: { message: 'Missing bearer token', status: 401 } });
   }
 
+  // For guest mode -> x-guest-id required
   const guestId = mode === 'public_guest' ? getGuestId(req) : null;
-
   if (mode === 'public_guest' && !guestId) {
     return jsonResponse(400, { error: { message: 'Missing x-guest-id header', status: 400 } });
   }
@@ -145,7 +146,9 @@ Deno.serve(async (req: Request) => {
 
     const { data: userData, error: userError } = await authClient.auth.getUser();
     if (userError || !userData.user?.id) {
-      return jsonResponse(401, { error: { message: 'Invalid token', status: 401, details: userError?.message } });
+      return jsonResponse(401, {
+        error: { message: 'Invalid token', status: 401, details: userError?.message ?? null },
+      });
     }
 
     userId = userData.user.id;
@@ -159,9 +162,12 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Cooldown: per user for auth modes; per guest id for guest mode (optionally scoped by IP)
+  // Cooldown
+  // - Guest: scoped by guestId + IP
+  // - Auth: scoped by userId
   const cooldownKey =
     mode === 'public_guest' ? `guest:${guestId ?? 'missing'}:ip:${ip}` : `uid:${userId ?? 'unknown'}`;
+
   const now = Date.now();
   const last = cooldownByKey.get(cooldownKey) ?? 0;
   if (now - last < 3000) {
@@ -174,15 +180,17 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
 
-  // Load conversation
+  // Load conversation (include guest_id)
   const { data: conv, error: convError } = await serviceClient
     .from('conversations')
-    .select('id, type, customer_id')
+    .select('id, type, customer_id, guest_id')
     .eq('id', conversationId)
     .maybeSingle();
 
   if (convError) {
-    return jsonResponse(500, { error: { message: 'Failed to load conversation', status: 500, details: convError.message } });
+    return jsonResponse(500, {
+      error: { message: 'Failed to load conversation', status: 500, details: convError.message },
+    });
   }
 
   const conversation = (conv ?? null) as ConversationRow | null;
@@ -191,16 +199,44 @@ Deno.serve(async (req: Request) => {
   }
 
   // Mode → conversation validation
-  if ((mode === 'public_guest' || mode === 'public_auth') && conversation.type !== 'public') {
-    return jsonResponse(400, { error: { message: 'Conversation is not public', status: 400 } });
+  // 1) public_auth must be public
+  if (mode === 'public_auth') {
+    if (conversation.type !== 'public') {
+      return jsonResponse(400, { error: { message: 'Conversation is not public', status: 400 } });
+    }
   }
 
+  // 2) private_user must be private and owned by user
   if (mode === 'private_user') {
     if (conversation.type !== 'private') {
       return jsonResponse(400, { error: { message: 'Conversation is not private', status: 400 } });
     }
     if (!userId || conversation.customer_id !== userId) {
       return jsonResponse(403, { error: { message: 'Not allowed', status: 403 } });
+    }
+  }
+
+  // 3) admin can send to any conversation
+  //    (optional extra: ensure conversation exists already - done above)
+
+  // 4) public_guest:
+  //    - allowed to send to:
+  //       a) public conversation (shared)
+  //       b) private guest conversation where conversation.guest_id matches x-guest-id
+  if (mode === 'public_guest') {
+    if (conversation.type === 'public') {
+      // ok
+    } else {
+      // must be private guest conversation
+      if (conversation.type !== 'private') {
+        return jsonResponse(400, { error: { message: 'Invalid conversation type', status: 400 } });
+      }
+      if (!guestId || !conversation.guest_id || conversation.guest_id !== guestId) {
+        return jsonResponse(403, { error: { message: 'Not allowed (guest mismatch)', status: 403 } });
+      }
+      // Also ensure no customer_id is set for guest conversation (optional safety)
+      // If you allow linking guest -> real user later, you can remove this.
+      // if (conversation.customer_id) return jsonResponse(403, { error: { message: 'Guest chat is not available here', status: 403 } });
     }
   }
 
@@ -223,7 +259,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse(500, { error: { message: 'Insert failed', status: 500, details: insertError.message } });
   }
 
-  // Non-fatal: update conversation meta (you also have a trigger already)
+  // Update conversation meta (non-fatal)
   const nowIso = new Date().toISOString();
   const preview = body.length > 80 ? body.slice(0, 80) : body;
 
