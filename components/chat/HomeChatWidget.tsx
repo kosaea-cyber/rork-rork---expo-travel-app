@@ -17,7 +17,6 @@ import { MessageCircle, Send, X } from 'lucide-react-native';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
-import { supabase } from '@/lib/supabase/client';
 import { useAuthStore } from '@/store/authStore';
 import type { Conversation, Message } from '@/store/chatStore';
 import { useChatStore } from '@/store/chatStore';
@@ -116,26 +115,20 @@ export default function HomeChatWidget() {
     try {
       console.log('[HomeChatWidget] bootstrap');
 
-      let conv: Conversation | null = null;
-
+      // ✅ Guest mode: anonymous auth is disabled, so we don't attempt signInAnonymously.
+      // For now, we show a clear message until guest conversations are wired via Edge Functions.
       if (!user) {
-        console.log('[HomeChatWidget] guest open -> signInAnonymously');
+        console.log('[HomeChatWidget] guest open (anonymous auth disabled)');
 
-        const { data: sessionData } = await supabase.auth.getSession();
-        const hasSession = Boolean(sessionData.session);
-
-        if (!hasSession) {
-          const { error: anonErr } = await supabase.auth.signInAnonymously();
-          if (anonErr) {
-            console.error('[HomeChatWidget] signInAnonymously failed', anonErr);
-            throw anonErr;
-          }
-        }
-      } else {
-        console.log('[HomeChatWidget] signed-in open -> private conversation');
+        setConversation(null);
+        setIsBootstrapping(false);
+        setLocalError('Guest chat is not configured yet. Please sign in to chat for now.');
+        return;
       }
 
-      conv = await getOrCreatePrivateConversation();
+      console.log('[HomeChatWidget] signed-in open -> private conversation');
+
+      const conv = await getOrCreatePrivateConversation();
       if (!conv) {
         const storeErrUnknown: unknown = useChatStore.getState().error;
         const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
@@ -146,6 +139,7 @@ export default function HomeChatWidget() {
             : 'Chat is not configured yet. Please contact support.'
         );
 
+        setConversation(null);
         setIsBootstrapping(false);
         return;
       }
@@ -153,6 +147,7 @@ export default function HomeChatWidget() {
       setConversation(conv);
       await fetchMessages(conv.id, 30);
       void markConversationReadForUser(conv.id);
+
       setIsBootstrapping(false);
 
       requestAnimationFrame(() => {
@@ -233,6 +228,13 @@ export default function HomeChatWidget() {
 
   const onSend = useCallback(async () => {
     const convId = conversation?.id;
+
+    // ✅ If guest, we do not allow sending yet (until guest chat is implemented properly).
+    if (!user) {
+      showToast('Please sign in to send messages (guest chat coming soon).');
+      return;
+    }
+
     if (!convId) {
       setLocalError('Chat is not ready yet.');
       return;
@@ -258,7 +260,7 @@ export default function HomeChatWidget() {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
     }
-  }, [conversation?.id, draft, sendMessage, showToast]);
+  }, [conversation?.id, draft, sendMessage, showToast, user]);
 
   const effectiveError = localError ?? error;
   const showLoading = isBootstrapping || isLoading;
@@ -333,11 +335,6 @@ export default function HomeChatWidget() {
                   </Text>
                   <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestLabel">
                     {user ? 'Signed in' : 'Guest'}
-                    {!user ? (
-                      <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestAnonNote">
-                        Anonymous session
-                      </Text>
-                    ) : null}
                   </Text>
 
                   {realtimeHealth === 'error' ? (
