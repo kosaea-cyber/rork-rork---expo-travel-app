@@ -198,24 +198,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
-    console.log('[logout] start');
+    console.log('[logout] start', {
+      hasUser: Boolean(get().user),
+      isGuest: get().isGuest,
+    });
 
     try {
       const { error } = await supabase.auth.signOut();
       if (error) {
-        console.error('[logout] error', error);
+        console.error('[logout] supabase signOut error', safeErrorDetails(error));
       }
     } catch (e) {
-      console.error('[logout] error', e);
+      console.error('[logout] supabase signOut unexpected error', safeErrorDetails(e));
     }
 
     try {
       useProfileStore.getState().clearProfile();
     } catch (e) {
-      console.error('[logout] error', e);
+      console.error('[logout] clearProfile error', safeErrorDetails(e));
     }
 
-    set({ user: null, isAdmin: false, isGuest: false });
+    try {
+      const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+      await AsyncStorage.multiRemove(['chat_guest_id']);
+      console.log('[logout] cleared guest storage keys');
+    } catch (e) {
+      console.warn('[logout] failed to clear guest storage keys (non-blocking)', safeErrorDetails(e));
+    }
+
+    set({ user: null, isAdmin: false, isGuest: false, isLoading: false });
 
     console.log('[logout] done');
   },
