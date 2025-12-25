@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { AlertTriangle, RotateCcw } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 import { useProfileStore, type PreferredLanguage } from '@/store/profileStore';
@@ -34,13 +34,7 @@ function pickLocalized(
   row: Pick<SiteContentRow, 'title_en' | 'title_ar' | 'title_de'>,
   lang: PreferredLanguage,
 ): string {
-  const byLang =
-    lang === 'ar'
-      ? row.title_ar
-      : lang === 'de'
-        ? row.title_de
-        : row.title_en;
-
+  const byLang = lang === 'ar' ? row.title_ar : lang === 'de' ? row.title_de : row.title_en;
   return (byLang ?? row.title_en ?? row.title_ar ?? row.title_de ?? '').trim();
 }
 
@@ -48,13 +42,7 @@ function pickLocalizedBody(
   row: Pick<SiteContentRow, 'body_en' | 'body_ar' | 'body_de'>,
   lang: PreferredLanguage,
 ): string {
-  const byLang =
-    lang === 'ar'
-      ? row.body_ar
-      : lang === 'de'
-        ? row.body_de
-        : row.body_en;
-
+  const byLang = lang === 'ar' ? row.body_ar : lang === 'de' ? row.body_de : row.body_en;
   return (byLang ?? row.body_en ?? row.body_ar ?? row.body_de ?? '').trim();
 }
 
@@ -108,9 +96,7 @@ export default function StaticContentScreen({
 
         const { data, error } = await supabase
           .from('site_content')
-          .select(
-            'id,key,is_active,title_en,title_ar,title_de,body_en,body_ar,body_de,updated_at,created_at',
-          )
+          .select('id,key,is_active,title_en,title_ar,title_de,body_en,body_ar,body_de,updated_at,created_at')
           .eq('key', contentKey)
           .eq('is_active', true)
           .maybeSingle<SiteContentRow>();
@@ -190,7 +176,7 @@ export default function StaticContentScreen({
     return (
       <View style={styles.errorWrap} testID={`${testIDPrefix}-error`}>
         <View style={styles.errorIcon}>
-          <AlertTriangle color={Colors.error} size={22} />
+          <Ionicons name="warning-outline" color={Colors.error} size={22} />
         </View>
         <Text style={styles.errorTitle}>Couldn’t load this page</Text>
         <Text style={styles.errorMessage}>{errorMessage}</Text>
@@ -201,7 +187,7 @@ export default function StaticContentScreen({
           activeOpacity={0.85}
           testID={`${testIDPrefix}-retry`}
         >
-          <RotateCcw color={Colors.background} size={18} />
+          <Ionicons name="refresh-outline" color={Colors.background} size={18} />
           <Text style={styles.retryText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -217,7 +203,10 @@ export default function StaticContentScreen({
           onPress={() => {
             Alert.alert('Not available', 'This content is not available right now.');
           }}
-          style={[styles.retryButton, { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border }]}
+          style={[
+            styles.retryButton,
+            { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border },
+          ]}
           activeOpacity={0.85}
           testID={`${testIDPrefix}-empty-cta`}
         >

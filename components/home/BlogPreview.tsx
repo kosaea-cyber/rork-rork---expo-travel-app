@@ -1,13 +1,21 @@
 import React, { useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+  ScrollView,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
+
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 import { useI18nStore } from '@/constants/i18n';
 import { useProfileStore, type PreferredLanguage } from '@/store/profileStore';
 import { AsyncImage } from '@/components/AsyncImage';
-import { ChevronRight } from 'lucide-react-native';
 
 type BlogPostPreviewRow = {
   id: string;
@@ -27,14 +35,23 @@ function formatDate(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' });
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  });
 }
 
 function pickLocalized(
   row: Pick<BlogPostPreviewRow, 'title_en' | 'title_ar' | 'title_de'>,
   lang: PreferredLanguage
 ): string {
-  const v = lang === 'ar' ? row.title_ar : lang === 'de' ? row.title_de : row.title_en;
+  const v = lang === 'ar'
+    ? row.title_ar
+    : lang === 'de'
+      ? row.title_de
+      : row.title_en;
+
   return v ?? row.title_en ?? row.title_de ?? row.title_ar ?? '';
 }
 
@@ -42,7 +59,12 @@ function pickLocalizedExcerpt(
   row: Pick<BlogPostPreviewRow, 'excerpt_en' | 'excerpt_ar' | 'excerpt_de'>,
   lang: PreferredLanguage
 ): string {
-  const v = lang === 'ar' ? row.excerpt_ar : lang === 'de' ? row.excerpt_de : row.excerpt_en;
+  const v = lang === 'ar'
+    ? row.excerpt_ar
+    : lang === 'de'
+      ? row.excerpt_de
+      : row.excerpt_en;
+
   return v ?? row.excerpt_en ?? row.excerpt_de ?? row.excerpt_ar ?? '';
 }
 
@@ -84,27 +106,23 @@ export default function BlogPreview() {
     };
   }, [lang]);
 
-  const { data: postsData, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['blog_posts', { latest: true, limit: 3 }],
     queryFn: async (): Promise<BlogPostPreviewRow[]> => {
-      console.log('[blog][preview] fetching latest blog_posts');
       const { data, error } = await supabase
         .from('blog_posts')
         .select(
-          'id,is_active,created_at,published_at,cover_image_url,title_en,title_ar,title_de,excerpt_en,excerpt_ar,excerpt_de'
+          'id,is_active,created_at,published_at,cover_image_url,' +
+          'title_en,title_ar,title_de,excerpt_en,excerpt_ar,excerpt_de'
         )
         .eq('is_active', true)
         .not('published_at', 'is', null)
-        .order('published_at', { ascending: false, nullsFirst: false })
+        .order('published_at', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(3);
 
-      if (error) {
-        console.error('[blog][preview] latest blog_posts error', error);
-        throw new Error(error.message);
-      }
-
-      return (data ?? []) as BlogPostPreviewRow[];
+      if (error) throw new Error(error.message);
+      return data ?? [];
     },
   });
 
@@ -125,7 +143,7 @@ export default function BlogPreview() {
 
   if (isLoading) {
     return (
-      <View style={styles.loadingWrap} testID="home-blog-preview-loading">
+      <View style={styles.loadingWrap}>
         <ActivityIndicator color={Colors.tint} />
         <Text style={styles.loadingText}>{copy.loading}</Text>
       </View>
@@ -134,25 +152,26 @@ export default function BlogPreview() {
 
   if (isError) {
     return (
-      <View style={styles.errorWrap} testID="home-blog-preview-error">
+      <View style={styles.errorWrap}>
         <Text style={styles.errorTitle}>{copy.error}</Text>
-        <Pressable testID="home-blog-preview-retry" onPress={onRetry} style={styles.retryBtn}>
+        <Pressable onPress={onRetry} style={styles.retryBtn}>
           <Text style={styles.retryText}>{copy.retry}</Text>
         </Pressable>
       </View>
     );
   }
 
-  const posts = postsData ?? [];
+  const posts = data ?? [];
   if (posts.length === 0) return null;
 
   return (
-    <View style={styles.container} testID="home-blog-preview">
+    <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.sectionTitle}>{copy.title}</Text>
-        <Pressable testID="home-blog-preview-see-all" onPress={onSeeAll} style={styles.seeAllBtn}>
+
+        <Pressable onPress={onSeeAll} style={styles.seeAllBtn}>
           <Text style={styles.seeAllText}>{copy.seeAll}</Text>
-          <ChevronRight size={16} color={Colors.tint} />
+          <Ionicons name="chevron-forward" size={16} color={Colors.tint} />
         </Pressable>
       </View>
 
@@ -160,7 +179,6 @@ export default function BlogPreview() {
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.row}
-        testID="home-blog-preview-row"
       >
         {posts.map((p) => {
           const title = pickLocalized(p, lang);
@@ -170,13 +188,11 @@ export default function BlogPreview() {
           return (
             <Pressable
               key={p.id}
-              testID={`home-blog-card-${p.id}`}
               onPress={() => openPost(p.id)}
               style={styles.card}
             >
               {p.cover_image_url ? (
                 <AsyncImage
-                  testID={`home-blog-card-cover-${p.id}`}
                   uri={p.cover_image_url}
                   style={styles.cover}
                   resizeMode="cover"
@@ -187,12 +203,8 @@ export default function BlogPreview() {
 
               <View style={styles.cardBody}>
                 {dateLabel ? <Text style={styles.date}>{dateLabel}</Text> : null}
-                <Text style={styles.title} numberOfLines={2}>
-                  {title}
-                </Text>
-                <Text style={styles.excerpt} numberOfLines={2}>
-                  {excerpt}
-                </Text>
+                <Text style={styles.title} numberOfLines={2}>{title}</Text>
+                <Text style={styles.excerpt} numberOfLines={2}>{excerpt}</Text>
               </View>
             </Pressable>
           );
@@ -220,7 +232,6 @@ const styles = StyleSheet.create({
     color: Colors.text,
     fontSize: 18,
     fontWeight: '900',
-    letterSpacing: -0.2,
   },
   seeAllBtn: {
     flexDirection: 'row',
@@ -254,7 +265,6 @@ const styles = StyleSheet.create({
   cover: {
     height: 120,
     width: '100%',
-    backgroundColor: Colors.border,
   },
   coverFallback: {
     height: 120,
@@ -274,7 +284,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
     marginBottom: 6,
-    letterSpacing: -0.1,
   },
   excerpt: {
     color: Colors.textSecondary,

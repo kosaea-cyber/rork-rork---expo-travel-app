@@ -1,7 +1,16 @@
 import React, { useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ActivityIndicator, Image } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  Image,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { Plus, Trash2, Edit } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
@@ -37,7 +46,7 @@ export default function AdminBlogs() {
       const { data, error } = await supabase
         .from('blog_posts')
         .select(
-          'id, is_active, created_at, published_at, cover_image_url, title_en, title_ar, title_de, excerpt_en, excerpt_ar, excerpt_de',
+          'id, is_active, created_at, published_at, cover_image_url, title_en, title_ar, title_de, excerpt_en, excerpt_ar, excerpt_de'
         )
         .order('published_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false });
@@ -60,7 +69,6 @@ export default function AdminBlogs() {
   const blogs = useMemo(() => blogsQuery.data ?? [], [blogsQuery.data]);
 
   const goNew = useCallback(() => {
-    // uses the existing route app/admin/blog/[id].tsx with id="new"
     router.push({ pathname: '/admin/blog/[id]', params: { id: 'new' } });
   }, [router]);
 
@@ -68,7 +76,7 @@ export default function AdminBlogs() {
     (id: string) => {
       router.push({ pathname: '/admin/blog/[id]', params: { id } });
     },
-    [router],
+    [router]
   );
 
   const onDelete = useCallback(
@@ -89,7 +97,7 @@ export default function AdminBlogs() {
         },
       ]);
     },
-    [deleteMutation],
+    [deleteMutation]
   );
 
   const renderItem = useCallback(
@@ -128,23 +136,25 @@ export default function AdminBlogs() {
                 style={[styles.actionButton, { backgroundColor: Colors.primary }]}
                 onPress={() => goEdit(item.id)}
                 testID={`admin-blog-edit-${item.id}`}
+                activeOpacity={0.85}
               >
-                <Edit size={18} color="white" />
+                <Ionicons name="create-outline" size={18} color="white" />
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: Colors.error }]}
                 onPress={() => onDelete(item.id)}
                 testID={`admin-blog-delete-${item.id}`}
+                activeOpacity={0.85}
               >
-                <Trash2 size={18} color="white" />
+                <Ionicons name="trash-outline" size={18} color="white" />
               </TouchableOpacity>
             </View>
           </View>
         </View>
       );
     },
-    [goEdit, onDelete],
+    [goEdit, onDelete]
   );
 
   if (blogsQuery.isLoading) {
@@ -162,7 +172,12 @@ export default function AdminBlogs() {
       <View style={styles.stateWrap} testID="admin-blogs-error">
         <Text style={styles.stateText}>Couldn’t load blog posts.</Text>
         <Text style={[styles.stateText, { fontWeight: '700' }]}>{msg}</Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={() => blogsQuery.refetch()} testID="admin-blogs-retry">
+        <TouchableOpacity
+          style={styles.retryBtn}
+          onPress={() => blogsQuery.refetch()}
+          testID="admin-blogs-retry"
+          activeOpacity={0.85}
+        >
           <Text style={styles.retryText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -171,8 +186,13 @@ export default function AdminBlogs() {
 
   return (
     <View style={styles.container} testID="admin-blogs">
-      <TouchableOpacity style={styles.addButton} onPress={goNew} testID="admin-blogs-new">
-        <Plus size={24} color="white" />
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={goNew}
+        testID="admin-blogs-new"
+        activeOpacity={0.85}
+      >
+        <Ionicons name="add" size={22} color="white" />
         <Text style={styles.addButtonText}>New Blog Post</Text>
       </TouchableOpacity>
 
@@ -184,7 +204,7 @@ export default function AdminBlogs() {
         ListEmptyComponent={
           <View style={styles.stateWrap} testID="admin-blogs-empty">
             <Text style={styles.stateText}>No blog posts yet.</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={() => blogsQuery.refetch()}>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => blogsQuery.refetch()} activeOpacity={0.85}>
               <Text style={styles.retryText}>Refresh</Text>
             </TouchableOpacity>
           </View>
@@ -236,7 +256,13 @@ const styles = StyleSheet.create({
   excerpt: { fontSize: 13, color: '#444', marginTop: 8, fontWeight: '600', lineHeight: 18 },
 
   actions: { flexDirection: 'column', gap: 10 },
-  actionButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  actionButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   stateWrap: {
     flex: 1,

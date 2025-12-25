@@ -1,11 +1,22 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, SafeAreaView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  SafeAreaView,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { User, Settings, Info, HelpCircle, FileText, LogOut, MessageSquare, LayoutDashboard } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { useAuthStore } from '@/store/authStore';
 import HeaderLogo from '@/components/HeaderLogo';
+
+type IconName = keyof typeof Ionicons.glyphMap;
 
 export default function AccountScreen() {
   const t = useI18nStore((state) => state.t);
@@ -15,57 +26,62 @@ export default function AccountScreen() {
   const handleLogout = () => {
     Alert.alert(t('logout'), 'Are you sure you want to logout?', [
       { text: t('cancel'), style: 'cancel' },
-      { 
-        text: t('logout'), 
-        style: 'destructive', 
+      {
+        text: t('logout'),
+        style: 'destructive',
         onPress: async () => {
           await logout();
           router.replace('/auth/welcome');
-        } 
+        },
       },
     ]);
   };
 
-  const menuItems = [
+  const menuItems: {
+    title: string;
+    icon: IconName;
+    route: string;
+    authRequired: boolean;
+  }[] = [
     {
       title: t('myProfile'),
-      icon: User,
+      icon: 'person-outline',
       route: '/(tabs)/account/profile',
       authRequired: true,
     },
     {
       title: t('myMessages'),
-      icon: MessageSquare,
-      route: '/chat', // We will implement this route
+      icon: 'chatbubble-ellipses-outline',
+      route: '/chat',
       authRequired: true,
     },
     {
       title: t('settings'),
-      icon: Settings,
+      icon: 'settings-outline',
       route: '/(tabs)/account/settings',
-      authRequired: false, // For language settings
+      authRequired: false,
     },
     {
       title: t('about'),
-      icon: Info,
+      icon: 'information-circle-outline',
       route: '/(tabs)/account/about',
       authRequired: false,
     },
     {
       title: t('faq'),
-      icon: HelpCircle,
+      icon: 'help-circle-outline',
       route: '/(tabs)/account/faq',
       authRequired: false,
     },
     {
       title: t('blog'),
-      icon: FileText,
+      icon: 'document-text-outline',
       route: '/(tabs)/account/blog',
       authRequired: false,
     },
   ];
 
-  const handlePress = (item: typeof menuItems[0]) => {
+  const handlePress = (item: typeof menuItems[number]) => {
     if (item.authRequired && (isGuest || !user)) {
       router.push('/auth/login');
     } else {
@@ -87,10 +103,12 @@ export default function AccountScreen() {
           </Text>
         </View>
         <Text style={styles.userName}>{user ? user.name : 'Guest'}</Text>
-        <Text style={styles.userEmail}>{user ? user.email : 'Welcome to Ruwasi Elite'}</Text>
-        
-        {(!user && isGuest) && (
-          <TouchableOpacity 
+        <Text style={styles.userEmail}>
+          {user ? user.email : 'Welcome to Ruwasi Elite'}
+        </Text>
+
+        {!user && isGuest && (
+          <TouchableOpacity
             style={styles.loginButton}
             onPress={() => router.push('/auth/login')}
           >
@@ -107,27 +125,53 @@ export default function AccountScreen() {
             onPress={() => handlePress(item)}
           >
             <View style={styles.menuIcon}>
-              <item.icon color={Colors.tint} size={24} />
+              <Ionicons name={item.icon} size={24} color={Colors.tint} />
             </View>
             <Text style={styles.menuText}>{item.title}</Text>
           </TouchableOpacity>
         ))}
 
         {user && isAdmin && (
-          <TouchableOpacity style={[styles.menuItem, { borderColor: Colors.tint, backgroundColor: Colors.tint + '10' }]} onPress={() => router.push('/admin')}>
+          <TouchableOpacity
+            style={[
+              styles.menuItem,
+              { borderColor: Colors.tint, backgroundColor: Colors.tint + '10' },
+            ]}
+            onPress={() => router.push('/admin')}
+          >
             <View style={styles.menuIcon}>
-              <LayoutDashboard color={Colors.tint} size={24} />
+              <Ionicons
+                name="grid-outline"
+                size={24}
+                color={Colors.tint}
+              />
             </View>
-            <Text style={[styles.menuText, { color: Colors.tint, fontWeight: 'bold' }]}>Admin Dashboard</Text>
+            <Text
+              style={[
+                styles.menuText,
+                { color: Colors.tint, fontWeight: 'bold' },
+              ]}
+            >
+              Admin Dashboard
+            </Text>
           </TouchableOpacity>
         )}
 
         {user && (
-          <TouchableOpacity style={[styles.menuItem, styles.logoutItem]} onPress={handleLogout}>
+          <TouchableOpacity
+            style={[styles.menuItem, styles.logoutItem]}
+            onPress={handleLogout}
+          >
             <View style={styles.menuIcon}>
-              <LogOut color={Colors.error} size={24} />
+              <Ionicons
+                name="log-out-outline"
+                size={24}
+                color={Colors.error}
+              />
             </View>
-            <Text style={[styles.menuText, { color: Colors.error }]}>{t('logout')}</Text>
+            <Text style={[styles.menuText, { color: Colors.error }]}>
+              {t('logout')}
+            </Text>
           </TouchableOpacity>
         )}
       </ScrollView>

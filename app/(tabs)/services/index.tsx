@@ -11,7 +11,7 @@ import {
   Image,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { AlertTriangle, RefreshCcw, Search } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import HeaderLogo from '@/components/HeaderLogo';
 import { type Language } from '@/constants/i18n';
@@ -32,13 +32,20 @@ type ServiceCategoryRow = {
   created_at: string;
 };
 
-function getLocalizedDbField(row: ServiceCategoryRow, field: 'title' | 'description', lang: Language): string {
+function getLocalizedDbField(
+  row: ServiceCategoryRow,
+  field: 'title' | 'description',
+  lang: Language
+): string {
   const key = `${field}_${lang}` as const;
   const fallbackEn = `${field}_en` as const;
+
   const value = row[key as keyof ServiceCategoryRow];
   if (typeof value === 'string' && value.length > 0) return value;
+
   const en = row[fallbackEn as keyof ServiceCategoryRow];
   if (typeof en === 'string' && en.length > 0) return en;
+
   return '';
 }
 
@@ -63,7 +70,6 @@ export default function ServicesScreen() {
   }, [initialCategory]);
 
   const loadCategories = useCallback(async () => {
-    console.log('[services] loadCategories start');
     setLoading(true);
     setError(null);
 
@@ -74,22 +80,16 @@ export default function ServicesScreen() {
         .eq('is_active', true)
         .order('sort_order', { ascending: true });
 
-      console.log('[services] service_categories query', {
-        count: res.data?.length ?? 0,
-        error: res.error?.message ?? null,
-      });
-
       if (res.error) {
-        setCategories([]);
         setError(res.error.message);
+        setCategories([]);
         return;
       }
 
       setCategories((res.data ?? []) as ServiceCategoryRow[]);
-    } catch (e) {
-      console.error('[services] service_categories query unexpected error', e);
-      setCategories([]);
+    } catch {
       setError('Failed to load services.');
+      setCategories([]);
     } finally {
       setLoading(false);
     }
@@ -100,9 +100,14 @@ export default function ServicesScreen() {
   }, [loadCategories]);
 
   const chips: Chip[] = useMemo(() => {
-    const allLabel = language === 'ar' ? 'الكل' : language === 'de' ? 'Alle' : 'All';
+    const allLabel =
+      language === 'ar' ? 'الكل' : language === 'de' ? 'Alle' : 'All';
+
     return [{ id: 'all', label: allLabel }].concat(
-      categories.map((c) => ({ id: c.id, label: getLocalizedDbField(c, 'title', language) }))
+      categories.map((c) => ({
+        id: c.id,
+        label: getLocalizedDbField(c, 'title', language),
+      }))
     );
   }, [categories, language]);
 
@@ -112,7 +117,7 @@ export default function ServicesScreen() {
       const matchesCategory = selectedCategory === 'all' || c.id === selectedCategory;
       const title = getLocalizedDbField(c, 'title', language).toLowerCase();
       const desc = getLocalizedDbField(c, 'description', language).toLowerCase();
-      const matchesSearch = q.length === 0 || title.includes(q) || desc.includes(q);
+      const matchesSearch = !q || title.includes(q) || desc.includes(q);
       return matchesCategory && matchesSearch;
     });
   }, [categories, language, searchQuery, selectedCategory]);
@@ -121,9 +126,9 @@ export default function ServicesScreen() {
     ({ item }: { item: ServiceCategoryRow }) => {
       const title = getLocalizedDbField(item, 'title', language);
       const description = getLocalizedDbField(item, 'description', language);
+
       return (
         <TouchableOpacity
-          testID={`services-category-${item.id}`}
           style={styles.serviceCard}
           onPress={() => router.push(`/(tabs)/services/${item.id}`)}
           activeOpacity={0.9}
@@ -135,6 +140,7 @@ export default function ServicesScreen() {
               <View style={styles.thumbFallback} />
             )}
           </View>
+
           <View style={styles.serviceInfo}>
             <Text style={styles.serviceTitle} numberOfLines={1}>
               {title}
@@ -162,15 +168,13 @@ export default function ServicesScreen() {
     if (error) {
       return (
         <View style={styles.stateWrap}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <AlertTriangle color={Colors.textSecondary} size={18} />
-            <Text style={styles.stateText} numberOfLines={2}>
-              Couldn’t load services.
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="alert-circle-outline" size={18} color={Colors.textSecondary} />
+            <Text style={styles.stateText}>Couldn’t load services.</Text>
           </View>
 
-          <TouchableOpacity testID="services-retry" style={styles.retryBtn} onPress={loadCategories}>
-            <RefreshCcw color={Colors.background} size={16} />
+          <TouchableOpacity style={styles.retryBtn} onPress={loadCategories}>
+            <Ionicons name="refresh" size={16} color={Colors.background} />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -182,10 +186,13 @@ export default function ServicesScreen() {
         <Text style={styles.stateText}>No services found.</Text>
       </View>
     );
-  }, [error, loadCategories, loading]);
+  }, [error, loading, loadCategories]);
 
-  const headerTitle = language === 'ar' ? 'الخدمات' : language === 'de' ? 'Services' : 'Services';
-  const searchPlaceholder = language === 'ar' ? 'ابحث…' : language === 'de' ? 'Suchen…' : 'Search…';
+  const headerTitle =
+    language === 'ar' ? 'الخدمات' : language === 'de' ? 'Services' : 'Services';
+
+  const searchPlaceholder =
+    language === 'ar' ? 'ابحث…' : language === 'de' ? 'Suchen…' : 'Search…';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -195,9 +202,8 @@ export default function ServicesScreen() {
       </View>
 
       <View style={styles.searchContainer}>
-        <Search color={Colors.textSecondary} size={20} />
+        <Ionicons name="search" size={20} color={Colors.textSecondary} />
         <TextInput
-          testID="services-search"
           style={styles.searchInput}
           placeholder={searchPlaceholder}
           placeholderTextColor={Colors.textSecondary}
@@ -208,18 +214,25 @@ export default function ServicesScreen() {
 
       <View style={styles.categoriesContainer}>
         <FlatList
-          data={chips}
           horizontal
           showsHorizontalScrollIndicator={false}
+          data={chips}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.categoriesContent}
           renderItem={({ item }) => (
             <TouchableOpacity
-              testID={`services-chip-${item.id}`}
-              style={[styles.categoryChip, selectedCategory === item.id && styles.categoryChipActive]}
+              style={[
+                styles.categoryChip,
+                selectedCategory === item.id && styles.categoryChipActive,
+              ]}
               onPress={() => setSelectedCategory(item.id)}
             >
-              <Text style={[styles.categoryText, selectedCategory === item.id && styles.categoryTextActive]}>
+              <Text
+                style={[
+                  styles.categoryText,
+                  selectedCategory === item.id && styles.categoryTextActive,
+                ]}
+              >
                 {item.label}
               </Text>
             </TouchableOpacity>
@@ -242,10 +255,7 @@ export default function ServicesScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
   header: {
     padding: 20,
     paddingBottom: 10,
@@ -253,11 +263,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: Colors.tint,
-  },
+  headerTitle: { fontSize: 28, fontWeight: 'bold', color: Colors.tint },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -270,19 +276,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  searchInput: {
-    flex: 1,
-    marginLeft: 8,
-    color: Colors.text,
-    fontWeight: '600',
-  },
-  categoriesContainer: {
-    marginBottom: 16,
-  },
-  categoriesContent: {
-    paddingHorizontal: 20,
-    gap: 10,
-  },
+  searchInput: { flex: 1, marginLeft: 8, color: Colors.text, fontWeight: '600' },
+  categoriesContainer: { marginBottom: 16 },
+  categoriesContent: { paddingHorizontal: 20, gap: 10 },
   categoryChip: {
     paddingHorizontal: 16,
     paddingVertical: 9,
@@ -291,21 +287,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  categoryChipActive: {
-    backgroundColor: Colors.tint,
-    borderColor: Colors.tint,
-  },
-  categoryText: {
-    color: Colors.textSecondary,
-    fontWeight: '700',
-  },
-  categoryTextActive: {
-    color: Colors.background,
-  },
-  listContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
+  categoryChipActive: { backgroundColor: Colors.tint, borderColor: Colors.tint },
+  categoryText: { color: Colors.textSecondary, fontWeight: '700' },
+  categoryTextActive: { color: Colors.background },
+  listContent: { padding: 20, paddingBottom: 40 },
   serviceCard: {
     flexDirection: 'row',
     backgroundColor: Colors.card,
@@ -320,28 +305,14 @@ const styles = StyleSheet.create({
     height: 66,
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.04)',
     marginRight: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
   },
-  thumb: {
-    width: '100%',
-    height: '100%',
-  },
-  thumbFallback: {
-    flex: 1,
-    backgroundColor: 'rgba(212, 175, 55, 0.14)',
-  },
-  serviceInfo: {
-    flex: 1,
-    gap: 4,
-  },
-  serviceTitle: {
-    color: Colors.text,
-    fontSize: 17,
-    fontWeight: '800',
-  },
+  thumb: { width: '100%', height: '100%' },
+  thumbFallback: { flex: 1, backgroundColor: 'rgba(212,175,55,0.14)' },
+  serviceInfo: { flex: 1, gap: 4 },
+  serviceTitle: { color: Colors.text, fontSize: 17, fontWeight: '800' },
   serviceDesc: {
     color: Colors.textSecondary,
     fontSize: 13,
@@ -354,10 +325,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: Colors.card,
     padding: 16,
-    justifyContent: 'center',
     alignItems: 'center',
     gap: 10,
-    marginTop: 10,
   },
   stateText: {
     color: Colors.textSecondary,
@@ -368,16 +337,11 @@ const styles = StyleSheet.create({
   retryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 14,
     height: 36,
     borderRadius: 12,
     backgroundColor: Colors.tint,
   },
-  retryText: {
-    color: Colors.background,
-    fontSize: 13,
-    fontWeight: '800',
-  },
+  retryText: { color: Colors.background, fontSize: 13, fontWeight: '800' },
 });

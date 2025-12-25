@@ -1,7 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { Send } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
@@ -64,7 +74,7 @@ export default function ChatScreen() {
 
   const conversation = useMemo(
     () => conversations.find((c) => c.id === conversationId) ?? null,
-    [conversationId, conversations]
+    [conversationId, conversations],
   );
 
   const messages = useMemo<Message[]>(() => {
@@ -204,13 +214,15 @@ export default function ChatScreen() {
         </View>
       );
     },
-    [user?.id]
+    [user?.id],
   );
 
   if (!conversationId) {
     return (
       <View style={styles.container}>
-        <Text style={{ color: Colors.text }}>{user ? 'Conversation not found' : 'Please sign in to chat with support'}</Text>
+        <Text style={{ color: Colors.text }}>
+          {user ? 'Conversation not found' : 'Please sign in to chat with support'}
+        </Text>
       </View>
     );
   }
@@ -247,7 +259,10 @@ export default function ChatScreen() {
         }
       />
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
         <View style={styles.inputContainer}>
           <TextInput
             style={[styles.input, conversation?.type === 'public' && !user ? styles.inputDisabled : null]}
@@ -259,12 +274,15 @@ export default function ChatScreen() {
             testID="chat.input"
           />
           <TouchableOpacity
-            style={[styles.sendButton, (!text.trim() || (conversation?.type === 'public' && !user)) && styles.sendButtonDisabled]}
+            style={[
+              styles.sendButton,
+              (!text.trim() || (conversation?.type === 'public' && !user)) && styles.sendButtonDisabled,
+            ]}
             onPress={handleSend}
             disabled={!text.trim() || (conversation?.type === 'public' && !user)}
             testID="chat.send"
           >
-            <Send color={Colors.background} size={20} />
+            <Ionicons name="send-outline" size={20} color={Colors.background} />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

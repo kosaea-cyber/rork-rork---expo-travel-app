@@ -1,5 +1,4 @@
 import { supabase } from '@/lib/supabase/client';
-
 import type { Language } from '@/store/i18nStore';
 
 export type AiSettingsMode = 'off' | 'auto_reply' | 'human_handoff';
@@ -9,7 +8,11 @@ export type AiSettings = {
   mode: AiSettingsMode;
   allow_public: boolean;
   allow_private: boolean;
+
+  // ما عندك عمود بالـ DB لهذا حالياً، نخليه true افتراضياً
   realtime_enabled: boolean;
+
+  // prompts لكل لغة
   prompts: Record<string, string>;
 };
 
@@ -20,6 +23,25 @@ const DEFAULT_AI_SETTINGS: AiSettings = {
   allow_private: true,
   realtime_enabled: true,
   prompts: {},
+};
+
+type AiSettingsRow = {
+  id: string;
+  is_enabled: boolean | null;
+  mode: string | null;
+  public_chat_enabled: boolean | null;
+  private_chat_enabled: boolean | null;
+
+  // أعمدة اللغات الجديدة
+  system_prompt_en: string | null;
+  system_prompt_ar: string | null;
+  system_prompt_de: string | null;
+
+  // القديم (لو موجود)
+  system_prompt?: string | null;
+
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type AiSettingsCacheState = {
@@ -42,98 +64,68 @@ function normalizeMode(input: unknown): AiSettingsMode {
   return 'off';
 }
 
-function normalizePrompts(input: unknown): Record<string, string> {
-  if (!input || typeof input !== 'object') return {};
-  const rec = input as Record<string, unknown>;
-  const out: Record<string, string> = {};
-  for (const k of Object.keys(rec)) {
-    const v = rec[k];
-    if (typeof v === 'string') out[k] = v;
-  }
-  return out;
-}
-
-const REALTIME_PROMPT_KEY = '__realtime_enabled';
-
-function promptBool(value: unknown): boolean | null {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
-    const v = value.trim().toLowerCase();
-    if (v === '1' || v === 'true' || v === 'yes' || v === 'on') return true;
-    if (v === '0' || v === 'false' || v === 'no' || v === 'off') return false;
-  }
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-  return null;
-}
-
-function normalizeAiSettingsRow(row: unknown): AiSettings {
-  const r = row as Record<string, unknown>;
-
-  const enabledRaw = r.enabled ?? r.is_enabled;
-  const allowPublicRaw = r.allow_public ?? r.public_chat_enabled;
-  const allowPrivateRaw = r.allow_private ?? r.private_chat_enabled;
-
-  const prompts = normalizePrompts(r.prompts);
-  const realtimeRaw = r.realtime_enabled ?? r.realtimeEnabled ?? prompts[REALTIME_PROMPT_KEY];
-  const realtime = promptBool(realtimeRaw) ?? DEFAULT_AI_SETTINGS.realtime_enabled;
-
-  return {
-    enabled: typeof enabledRaw === 'boolean' ? enabledRaw : DEFAULT_AI_SETTINGS.enabled,
-    mode: normalizeMode(r.mode),
-    allow_public: typeof allowPublicRaw === 'boolean' ? allowPublicRaw : DEFAULT_AI_SETTINGS.allow_public,
-    allow_private: typeof allowPrivateRaw === 'boolean' ? allowPrivateRaw : DEFAULT_AI_SETTINGS.allow_private,
-    realtime_enabled: realtime,
-    prompts,
-  };
-}
-
-export function withRealtimePrompt(settings: AiSettings): Record<string, string> {
-  return {
-    ...(settings.prompts ?? {}),
-    [REALTIME_PROMPT_KEY]: settings.realtime_enabled ? '1' : '0',
-  };
-}
-
-export { REALTIME_PROMPT_KEY };
-
 function normalizeLanguage(input: unknown): Language {
   if (input === 'en' || input === 'ar' || input === 'de') return input;
   return 'en';
+}
+
+function safeText(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+function normalizeAiSettingsRow(row: AiSettingsRow): AiSettings {
+  const enabled = typeof row.is_enabled === 'boolean' ? row.is_enabled : DEFAULT_AI_SETTINGS.enabled;
+  const allow_public =
+    typeof row.public_chat_enabled === 'boolean' ? row.public_chat_enabled : DEFAULT_AI_SETTINGS.allow_public;
+  const allow_private =
+    typeof row.private_chat_enabled === 'boolean' ? row.private_chat_enabled : DEFAULT_AI_SETTINGS.allow_private;
+
+  // نقرأ لكل لغة، وإذا فاضي نرجع لـ system_prompt القديم، وإذا فاضي نعمل fallback للإنجليزي
+  const legacy = safeText(row.system_prompt);
+
+  const en = safeText(row.system_prompt_en) || legacy;
+  const ar = safeText(row.system_prompt_ar) || legacy || en;
+  const de = safeText(row.system_prompt_de) || legacy || en;
+
+  const prompts: Record<string, string> = {};
+  if (en) prompts.en = en;
+  if (ar) prompts.ar = ar;
+  if (de) prompts.de = de;
+
+  return {
+    enabled,
+    mode: normalizeMode(row.mode),
+    allow_public,
+    allow_private,
+    realtime_enabled: DEFAULT_AI_SETTINGS.realtime_enabled,
+    prompts,
+  };
 }
 
 export async function getAiSettings(): Promise<AiSettings> {
   try {
     console.log('[ai][settings] getAiSettings');
 
-    const primary = await supabase
+    const res = await supabase
       .from('ai_settings')
-      .select('*')
-      .eq('key', 'default')
-      .maybeSingle();
+      .select(
+        'id,is_enabled,mode,public_chat_enabled,private_chat_enabled,system_prompt_en,system_prompt_ar,system_prompt_de,system_prompt,created_at,updated_at'
+      )
+      .order('updated_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle<AiSettingsRow>();
 
-    if (!primary.error) {
-      return primary.data ? normalizeAiSettingsRow(primary.data) : DEFAULT_AI_SETTINGS;
-    }
-
-    console.error('[ai][settings] primary load failed; falling back', {
-      message: primary.error.message,
-      code: (primary.error as { code?: string }).code ?? null,
-    });
-
-    const fallback = await supabase.from('ai_settings').select('*').limit(1).maybeSingle();
-
-    if (fallback.error) {
-      console.error('[ai][settings] fallback load failed', {
-        message: fallback.error.message,
-        code: (fallback.error as { code?: string }).code ?? null,
+    if (res.error) {
+      console.error('[ai][settings] load failed', {
+        message: res.error.message,
+        code: (res.error as { code?: string }).code ?? null,
       });
       return DEFAULT_AI_SETTINGS;
     }
 
-    return fallback.data ? normalizeAiSettingsRow(fallback.data) : DEFAULT_AI_SETTINGS;
+    if (!res.data) return DEFAULT_AI_SETTINGS;
+    return normalizeAiSettingsRow(res.data);
   } catch (e) {
     console.error('[ai][settings] unexpected error', e);
     return DEFAULT_AI_SETTINGS;
@@ -142,15 +134,9 @@ export async function getAiSettings(): Promise<AiSettings> {
 
 export async function getAiSettingsCached(): Promise<AiSettings> {
   try {
-    if (isCacheValid(cache)) {
-      console.log('[ai][settings] cache hit', { ageMs: Date.now() - cache.updatedAtMs });
-      return cache.value;
-    }
+    if (isCacheValid(cache)) return cache.value;
 
-    if (inFlight) {
-      console.log('[ai][settings] awaiting in-flight request');
-      return await inFlight;
-    }
+    if (inFlight) return await inFlight;
 
     inFlight = (async () => {
       const value = await getAiSettings();
@@ -159,8 +145,7 @@ export async function getAiSettingsCached(): Promise<AiSettings> {
     })();
 
     return await inFlight;
-  } catch (e) {
-    console.error('[ai][settings] cache wrapper unexpected error', e);
+  } catch {
     return DEFAULT_AI_SETTINGS;
   } finally {
     inFlight = null;

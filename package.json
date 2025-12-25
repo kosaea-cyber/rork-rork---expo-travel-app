@@ -8,16 +8,18 @@
     "start": "expo start",
     "android": "expo run:android",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "ios": "expo run:ios"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-picker/picker": "^2.11.4",
     "@supabase/supabase-js": "^2.87.1",
     "@tanstack/react-query": "^5.83.0",
     "expo": "~54.0.25",
     "expo-blur": "~15.0.7",
-    "expo-constants": "~18.0.10",
+    "expo-constants": "~18.0.12",
     "expo-crypto": "~15.0.8",
     "expo-dev-client": "~6.0.20",
     "expo-file-system": "~19.0.20",
@@ -34,9 +36,8 @@
     "expo-status-bar": "~3.0.8",
     "expo-system-ui": "~6.0.8",
     "expo-web-browser": "~15.0.9",
-    "lucide-react-native": "^0.475.0",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-reanimated": "~4.1.1",
@@ -44,29 +45,16 @@
     "react-native-screens": "~4.16.0",
     "react-native-svg": "15.12.1",
     "react-native-url-polyfill": "^3.0.0",
-    "react-native-worklets": "^0.5.2",
+    "react-native-worklets": "0.5.1",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
-    "@types/react": "~18.2.45",
+    "@types/node": "^25.0.3",
+    "@types/react": "~19.1.10",
+    "@types/react-native": "^0.73.0",
     "eslint": "^9.31.0",
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"
-  },
-  "overrides": {
-    "react": "18.2.0",
-    "react-dom": "18.2.0"
-  },
-  "expo": {
-  "install": {
-    "exclude": [
-      "react",
-      "react-dom",
-      "@types/react",
-      "react-native-worklets"
-    ]
   }
-}
-
 }

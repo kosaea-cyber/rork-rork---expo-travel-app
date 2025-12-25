@@ -14,8 +14,8 @@ import {
   View,
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as LucideIcons from 'lucide-react-native';
-import { Check, ChevronDown, Edit2, ImagePlus, Plus, Save, Trash2, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 import { deleteStorageObjectByPublicUrl, pickAndUploadImage } from '@/lib/supabase/storageUpload';
@@ -29,7 +29,7 @@ type ServiceCategoryRow = {
   description_en: string | null;
   description_ar: string | null;
   description_de: string | null;
-  icon: string | null;
+  icon: string | null; // now stores Ionicons name
   image_url: string | null;
   is_active: boolean | null;
   sort_order: number | null;
@@ -60,15 +60,13 @@ type EditableCategory = {
   description_en: string;
   description_ar: string;
   description_de: string;
-  icon: string;
+  icon: string; // Ionicons name
   image_url: string;
   is_active: boolean;
   sort_order: number;
 };
 
-type IconName = keyof typeof LucideIcons;
-
-const DEFAULT_ICON = 'Grid3X3' as const;
+const DEFAULT_ICON = 'grid-outline';
 
 function slugify(input: string): string {
   return input
@@ -94,45 +92,53 @@ function normalizeEditable(row?: ServiceCategoryRow | null): EditableCategory {
     description_en: row?.description_en ?? '',
     description_ar: row?.description_ar ?? '',
     description_de: row?.description_de ?? '',
-    icon: row?.icon ?? DEFAULT_ICON,
+    icon: (row?.icon ?? DEFAULT_ICON).trim() || DEFAULT_ICON,
     image_url: row?.image_url ?? '',
     is_active: row?.is_active ?? true,
     sort_order: row?.sort_order ?? 0,
   };
 }
 
-function getLucideIconComponent(iconName: string | null | undefined) {
-  const name = (iconName?.trim() || DEFAULT_ICON) as IconName;
-  const maybe = (LucideIcons as Record<string, unknown>)[name];
-  if (typeof maybe === 'function') return maybe as React.ComponentType<{ size?: number; color?: string }>;
-  return LucideIcons.Grid3X3;
+/**
+ * We can't type-check Ionicons name union easily here,
+ * so we just ensure we always return a sane default.
+ */
+function getIonIconName(iconName: string | null | undefined): string {
+  const name = (iconName ?? '').trim();
+  if (!name) return DEFAULT_ICON;
+
+  // basic sanity: Ionicons names often end with "-outline" / "-sharp" or are plain.
+  // If old lucide name is stored, fallback.
+  if (!name.includes('-')) return DEFAULT_ICON;
+
+  return name;
 }
 
-const ICON_PRESETS: IconName[] = [
-  'Grid3X3',
-  'Sparkles',
-  'Plane',
-  'Car',
-  'Hotel',
-  'ShieldCheck',
-  'Stethoscope',
-  'HeartHandshake',
-  'Waves',
-  'Sun',
-  'Moon',
-  'Palmtree',
-  'ShoppingBag',
-  'Crown',
-  'Gem',
-  'ConciergeBell',
-  'MapPin',
-  'Camera',
-  'Flower2',
-  'Leaf',
-  'Utensils',
-  'GraduationCap',
-  'Baby',
-  'Users',
+// Presets only (fast + stable)
+const ICON_PRESETS: string[] = [
+  'grid-outline',
+  'sparkles-outline',
+  'airplane-outline',
+  'car-outline',
+  'bed-outline',
+  'shield-checkmark-outline',
+  'medkit-outline',
+  'heart-outline',
+  'water-outline',
+  'sunny-outline',
+  'moon-outline',
+  'leaf-outline',
+  'bag-outline',
+  'diamond-outline',
+  'cafe-outline',
+  'pin-outline',
+  'camera-outline',
+  'flower-outline',
+  'restaurant-outline',
+  'school-outline',
+  'happy-outline',
+  'people-outline',
+  'chatbubble-ellipses-outline',
 ];
 
 export default function AdminServices() {
@@ -333,7 +339,7 @@ export default function AdminServices() {
       ...editing,
       slug: trimmedSlug,
       sort_order: Number.isFinite(editing.sort_order) ? editing.sort_order : 0,
-      icon: (editing.icon?.trim() || DEFAULT_ICON) as string,
+      icon: getIonIconName(editing.icon),
     };
 
     if (!payload.title_en.trim()) {
@@ -402,14 +408,11 @@ export default function AdminServices() {
 
   const listData = useMemo<ServiceCategoryRow[]>(() => categories ?? [], [categories]);
 
-  const filteredIcons = useMemo<IconName[]>(() => {
+  const filteredIcons = useMemo<string[]>(() => {
     const q = iconSearch.trim().toLowerCase();
-    const base = q
-      ? (Object.keys(LucideIcons) as IconName[]).filter((k) => k.toLowerCase().includes(q))
-      : ICON_PRESETS;
+    if (!q) return ICON_PRESETS;
 
-    const uniq = Array.from(new Set(base));
-    return uniq.slice(0, 60);
+    return ICON_PRESETS.filter((name) => name.toLowerCase().includes(q)).slice(0, 60);
   }, [iconSearch]);
 
   const onToggleActive = useCallback(
@@ -427,8 +430,8 @@ export default function AdminServices() {
 
   const renderItem = useCallback(
     ({ item }: { item: ServiceCategoryRow }) => {
-      const IconComp = getLucideIconComponent(item.icon);
       const active = item.is_active ?? false;
+      const iconName = getIonIconName(item.icon);
 
       return (
         <View style={styles.card} testID={`admin-category-card-${item.id}`}>
@@ -444,7 +447,7 @@ export default function AdminServices() {
                 <View style={styles.nameWrap}>
                   <View style={styles.titleRow}>
                     <View style={styles.iconBadge}>
-                      <IconComp size={16} color={active ? '#0F172A' : '#6B7280'} />
+                      <Ionicons name={iconName as any} size={16} color={active ? '#0F172A' : '#6B7280'} />
                     </View>
                     <Text style={styles.title} numberOfLines={1}>
                       {item.title_en?.trim() || '(Untitled)'}
@@ -467,19 +470,12 @@ export default function AdminServices() {
                     </Text>
                   </Pressable>
 
-                  <Pressable
-                    testID={`admin-category-edit-${item.id}`}
-                    onPress={() => openEdit(item)}
-                    style={styles.iconBtn}
-                  >
-                    <Edit2 size={18} color={'#0F172A'} />
+                  <Pressable testID={`admin-category-edit-${item.id}`} onPress={() => openEdit(item)} style={styles.iconBtn}>
+                    <Ionicons name="pencil-outline" size={18} color={'#0F172A'} />
                   </Pressable>
-                  <Pressable
-                    testID={`admin-category-delete-${item.id}`}
-                    onPress={() => onDelete(item)}
-                    style={styles.iconBtn}
-                  >
-                    <Trash2 size={18} color={Colors.error} />
+
+                  <Pressable testID={`admin-category-delete-${item.id}`} onPress={() => onDelete(item)} style={styles.iconBtn}>
+                    <Ionicons name="trash-outline" size={18} color={Colors.error} />
                   </Pressable>
                 </View>
               </View>
@@ -525,7 +521,7 @@ export default function AdminServices() {
           <Text style={styles.pageSubtitle}>Create, organize, and publish your categories.</Text>
         </View>
         <Pressable testID="admin-categories-add" style={styles.addBtn} onPress={openNew}>
-          <Plus size={18} color={'#0B1220'} />
+          <Ionicons name="add" size={18} color={'#0B1220'} />
           <Text style={styles.addBtnText}>New</Text>
         </Pressable>
       </View>
@@ -555,7 +551,7 @@ export default function AdminServices() {
               </Text>
             </View>
             <Pressable testID="admin-categories-modal-close" onPress={closeModal} style={styles.iconBtn}>
-              <X size={20} color={'#0F172A'} />
+              <Ionicons name="close" size={20} color={'#0F172A'} />
             </Pressable>
           </View>
 
@@ -682,19 +678,14 @@ export default function AdminServices() {
                     onPress={() => setIconPickerVisible(true)}
                   >
                     <View style={styles.pickerLeft}>
-                      {(() => {
-                        const IconComp = getLucideIconComponent(editing.icon);
-                        return (
-                          <View style={styles.iconPreview}>
-                            <IconComp size={18} color={'#0F172A'} />
-                          </View>
-                        );
-                      })()}
+                      <View style={styles.iconPreview}>
+                        <Ionicons name={getIonIconName(editing.icon) as any} size={18} color={'#0F172A'} />
+                      </View>
                       <Text style={styles.pickerText} numberOfLines={1}>
-                        {editing.icon || DEFAULT_ICON}
+                        {getIonIconName(editing.icon)}
                       </Text>
                     </View>
-                    <ChevronDown size={18} color={'#0F172A'} />
+                    <Ionicons name="chevron-down" size={18} color={'#0F172A'} />
                   </Pressable>
 
                   <Text style={styles.label}>Image</Text>
@@ -724,7 +715,7 @@ export default function AdminServices() {
                         {uploadingImage ? (
                           <ActivityIndicator color={'#0B1220'} />
                         ) : (
-                          <ImagePlus size={18} color={'#0B1220'} />
+                          <Ionicons name="image-outline" size={18} color={'#0B1220'} />
                         )}
                         <Text style={styles.primaryBtnText}>{uploadingImage ? 'Uploading…' : 'Upload image'}</Text>
                       </Pressable>
@@ -780,12 +771,17 @@ export default function AdminServices() {
                 </View>
 
                 <Pressable testID="admin-category-save" style={styles.saveBtn} onPress={onSave} disabled={saving}>
-                  {saving ? <ActivityIndicator color="white" /> : <Save size={18} color="white" />}
+                  {saving ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Ionicons name="save-outline" size={18} color="white" />
+                  )}
                   <Text style={styles.saveBtnText}>{saving ? 'Saving…' : 'Save changes'}</Text>
                 </Pressable>
               </>
             ) : null}
           </ScrollView>
+
           <Modal
             visible={iconPickerVisible}
             animationType="fade"
@@ -801,7 +797,7 @@ export default function AdminServices() {
                 <View style={styles.iconSheetHeader}>
                   <Text style={styles.iconSheetTitle}>Pick an icon</Text>
                   <Pressable testID="admin-category-icon-picker-close" onPress={() => setIconPickerVisible(false)}>
-                    <X size={18} color={'#0F172A'} />
+                    <Ionicons name="close" size={18} color={'#0F172A'} />
                   </Pressable>
                 </View>
 
@@ -810,14 +806,14 @@ export default function AdminServices() {
                   style={styles.searchInput}
                   value={iconSearch}
                   onChangeText={setIconSearch}
-                  placeholder="Search (e.g. Plane, PalmTree…)"
+                  placeholder="Search (e.g. airplane, car, bed…)"
                   autoCapitalize="none"
                 />
 
                 <ScrollView contentContainerStyle={styles.iconGrid}>
-                  {filteredIcons.map((iconName: IconName) => {
-                    const IconComp = getLucideIconComponent(iconName);
-                    const isSelected = editing?.icon === iconName;
+                  {filteredIcons.map((iconName) => {
+                    const isSelected = getIonIconName(editing?.icon) === iconName;
+
                     return (
                       <Pressable
                         key={iconName}
@@ -829,10 +825,10 @@ export default function AdminServices() {
                         }}
                       >
                         <View style={styles.iconCellTop}>
-                          <IconComp size={18} color={'#0F172A'} />
+                          <Ionicons name={iconName as any} size={18} color={'#0F172A'} />
                           {isSelected ? (
                             <View style={styles.checkBadge}>
-                              <Check size={12} color={'#0B1220'} />
+                              <Ionicons name="checkmark" size={12} color={'#0B1220'} />
                             </View>
                           ) : null}
                         </View>
@@ -852,476 +848,83 @@ export default function AdminServices() {
   );
 }
 
+// ✅ styles unchanged from your file (kept as-is)
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0B1220',
-  },
-  topBar: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  pageTitle: {
-    color: '#F8FAFC',
-    fontSize: 18,
-    fontWeight: '900',
-    letterSpacing: 0.2,
-  },
-  pageSubtitle: {
-    marginTop: 4,
-    color: 'rgba(248, 250, 252, 0.72)',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  addBtn: {
-    height: 36,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#E7C77B',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  addBtnText: {
-    color: '#0B1220',
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  list: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  card: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    borderRadius: 16,
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  cardTop: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-  },
-  thumb: {
-    width: 86,
-    height: 86,
-    borderRadius: 14,
-    margin: 12,
-  },
-  thumbPlaceholder: {
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  cardMain: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingRight: 12,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  nameWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  iconBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
-    backgroundColor: 'rgba(231, 199, 123, 0.90)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    color: '#F8FAFC',
-    fontSize: 15,
-    fontWeight: '900',
-    letterSpacing: 0.2,
-    flex: 1,
-  },
-  meta: {
-    marginTop: 6,
-    color: 'rgba(248, 250, 252, 0.70)',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  micro: {
-    marginTop: 10,
-    color: 'rgba(248, 250, 252, 0.52)',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  activePill: {
-    height: 30,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  activePillOn: {
-    backgroundColor: 'rgba(231, 199, 123, 0.92)',
-    borderColor: 'rgba(231, 199, 123, 0.92)',
-  },
-  activePillOff: {
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  activePillText: {
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  activePillTextOn: {
-    color: '#0B1220',
-  },
-  activePillTextOff: {
-    color: 'rgba(248, 250, 252, 0.70)',
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#F7F6F2',
-  },
-  modalHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(15, 23, 42, 0.06)',
-  },
-  modalTitle: {
-    color: '#0F172A',
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  modalSubtitle: {
-    marginTop: 4,
-    color: 'rgba(15, 23, 42, 0.55)',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  form: {
-    padding: 16,
-  },
-  section: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.06)',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    color: '#0F172A',
-    fontSize: 12,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 10,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: 'rgba(15, 23, 42, 0.70)',
-    marginBottom: 8,
-    marginTop: 12,
-  },
-  helpText: {
-    marginTop: 8,
-    fontSize: 11,
-    fontWeight: '700',
-    color: 'rgba(15, 23, 42, 0.55)',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    fontSize: 14,
-    backgroundColor: '#FBFBFA',
-    color: '#0F172A',
-    fontWeight: '700',
-  },
-  inputInvalid: {
-    borderColor: 'rgba(239, 68, 68, 0.55)',
-  },
-  textArea: {
-    minHeight: 96,
-    textAlignVertical: 'top',
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  slugRow: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'flex-end',
-  },
-  ghostBtn: {
-    height: 44,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ghostBtnText: {
-    color: '#0F172A',
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  pickerBtn: {
-    height: 46,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
-    backgroundColor: '#FBFBFA',
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  pickerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    minWidth: 0,
-    flex: 1,
-  },
-  pickerText: {
-    color: '#0F172A',
-    fontSize: 13,
-    fontWeight: '900',
-    flex: 1,
-  },
-  iconPreview: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
-    backgroundColor: 'rgba(231, 199, 123, 0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  imageRow: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-  },
-  formImage: {
-    width: 96,
-    height: 96,
-    borderRadius: 16,
-    backgroundColor: 'rgba(15, 23, 42, 0.06)',
-  },
-  formImagePlaceholder: {
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-  },
-  primaryBtn: {
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: '#E7C77B',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-  },
-  primaryBtnDisabled: {
-    opacity: 0.7,
-  },
-  primaryBtnText: {
-    color: '#0B1220',
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  ghostDangerBtn: {
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: 'rgba(239, 68, 68, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ghostDangerBtnText: {
-    color: '#B91C1C',
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  toggle: {
-    height: 46,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
-    backgroundColor: '#FBFBFA',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  toggleOn: {
-    borderColor: 'rgba(231, 199, 123, 0.75)',
-    backgroundColor: 'rgba(231, 199, 123, 0.18)',
-  },
-  toggleText: {
-    color: 'rgba(15, 23, 42, 0.65)',
-    fontWeight: '900',
-    fontSize: 12,
-  },
-  toggleTextOn: {
-    color: '#0F172A',
-  },
-  formError: {
-    color: '#B91C1C',
-    fontWeight: '900',
-    marginBottom: 10,
-  },
-  saveBtn: {
-    backgroundColor: '#0F172A',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
-    marginTop: 8,
-    gap: 10,
-  },
-  saveBtnText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  stateWrap: {
-    flex: 1,
-    backgroundColor: '#0B1220',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    gap: 12,
-  },
-  stateText: {
-    color: 'rgba(248, 250, 252, 0.86)',
-    fontSize: 14,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  retryBtn: {
-    marginTop: 8,
-    paddingHorizontal: 16,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: '#E7C77B',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  retryText: {
-    color: '#0B1220',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    padding: 16,
-    justifyContent: 'flex-end',
-  },
-  iconSheet: {
-    backgroundColor: '#F7F6F2',
-    borderRadius: 18,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    maxHeight: '80%',
-  },
-  iconSheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 6,
-    paddingBottom: 8,
-  },
-  iconSheetTitle: {
-    color: '#0F172A',
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  searchInput: {
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.10)',
-    paddingHorizontal: 12,
-    color: '#0F172A',
-    fontWeight: '800',
-  },
-  iconGrid: {
-    paddingTop: 12,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  iconCell: {
-    width: '31%',
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.08)',
-    borderRadius: 14,
-    padding: 10,
-  },
-  iconCellSelected: {
-    borderColor: 'rgba(231, 199, 123, 0.90)',
-    backgroundColor: 'rgba(231, 199, 123, 0.16)',
-  },
-  iconCellTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  checkBadge: {
-    width: 20,
-    height: 20,
-    borderRadius: 999,
-    backgroundColor: 'rgba(231, 199, 123, 0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconCellText: {
-    marginTop: 8,
-    color: '#0F172A',
-    fontSize: 11,
-    fontWeight: '900',
-  },
+  container: { flex: 1, backgroundColor: '#0B1220' },
+  topBar: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pageTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: '900', letterSpacing: 0.2 },
+  pageSubtitle: { marginTop: 4, color: 'rgba(248, 250, 252, 0.72)', fontSize: 12, fontWeight: '700' },
+  addBtn: { height: 36, paddingHorizontal: 12, borderRadius: 12, backgroundColor: '#E7C77B', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  addBtnText: { color: '#0B1220', fontSize: 13, fontWeight: '900' },
+  list: { paddingHorizontal: 16, paddingBottom: 16 },
+  card: { backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', borderRadius: 16, marginBottom: 12, overflow: 'hidden' },
+  cardTop: { flexDirection: 'row', alignItems: 'stretch' },
+  thumb: { width: 86, height: 86, borderRadius: 14, margin: 12 },
+  thumbPlaceholder: { backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)' },
+  cardMain: { flex: 1, paddingVertical: 12, paddingRight: 12 },
+  cardHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  nameWrap: { flex: 1, minWidth: 0 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconBadge: { width: 28, height: 28, borderRadius: 10, backgroundColor: 'rgba(231, 199, 123, 0.90)', alignItems: 'center', justifyContent: 'center' },
+  title: { color: '#F8FAFC', fontSize: 15, fontWeight: '900', letterSpacing: 0.2, flex: 1 },
+  meta: { marginTop: 6, color: 'rgba(248, 250, 252, 0.70)', fontSize: 12, fontWeight: '700' },
+  micro: { marginTop: 10, color: 'rgba(248, 250, 252, 0.52)', fontSize: 11, fontWeight: '700' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)' },
+  activePill: { height: 30, paddingHorizontal: 10, borderRadius: 999, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  activePillOn: { backgroundColor: 'rgba(231, 199, 123, 0.92)', borderColor: 'rgba(231, 199, 123, 0.92)' },
+  activePillOff: { backgroundColor: 'rgba(255,255,255,0.07)', borderColor: 'rgba(255,255,255,0.10)' },
+  activePillText: { fontSize: 12, fontWeight: '900' },
+  activePillTextOn: { color: '#0B1220' },
+  activePillTextOff: { color: 'rgba(248, 250, 252, 0.70)' },
+  modalContainer: { flex: 1, backgroundColor: '#F7F6F2' },
+  modalHeader: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(15, 23, 42, 0.06)' },
+  modalTitle: { color: '#0F172A', fontSize: 18, fontWeight: '900' },
+  modalSubtitle: { marginTop: 4, color: 'rgba(15, 23, 42, 0.55)', fontSize: 12, fontWeight: '800' },
+  form: { padding: 16 },
+  section: { backgroundColor: 'white', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: 'rgba(15, 23, 42, 0.06)', marginBottom: 12 },
+  sectionTitle: { color: '#0F172A', fontSize: 12, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 },
+  label: { fontSize: 12, fontWeight: '900', color: 'rgba(15, 23, 42, 0.70)', marginBottom: 8, marginTop: 12 },
+  helpText: { marginTop: 8, fontSize: 11, fontWeight: '700', color: 'rgba(15, 23, 42, 0.55)' },
+  input: { borderWidth: 1, borderColor: 'rgba(15, 23, 42, 0.10)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, backgroundColor: '#FBFBFA', color: '#0F172A', fontWeight: '700' },
+  inputInvalid: { borderColor: 'rgba(239, 68, 68, 0.55)' },
+  textArea: { minHeight: 96, textAlignVertical: 'top' },
+  row: { flexDirection: 'row', gap: 12 },
+  slugRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-end' },
+  ghostBtn: { height: 44, paddingHorizontal: 12, borderRadius: 12, backgroundColor: 'rgba(15, 23, 42, 0.06)', alignItems: 'center', justifyContent: 'center' },
+  ghostBtnText: { color: '#0F172A', fontSize: 12, fontWeight: '900' },
+  pickerBtn: { height: 46, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(15, 23, 42, 0.10)', backgroundColor: '#FBFBFA', paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pickerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 },
+  pickerText: { color: '#0F172A', fontSize: 13, fontWeight: '900', flex: 1 },
+  iconPreview: { width: 28, height: 28, borderRadius: 10, backgroundColor: 'rgba(231, 199, 123, 0.92)', alignItems: 'center', justifyContent: 'center' },
+  imageRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  formImage: { width: 96, height: 96, borderRadius: 16, backgroundColor: 'rgba(15, 23, 42, 0.06)' },
+  formImagePlaceholder: { borderWidth: 1, borderColor: 'rgba(15, 23, 42, 0.08)' },
+  primaryBtn: { height: 42, borderRadius: 12, backgroundColor: '#E7C77B', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 12 },
+  primaryBtnDisabled: { opacity: 0.7 },
+  primaryBtnText: { color: '#0B1220', fontSize: 13, fontWeight: '900' },
+  ghostDangerBtn: { height: 38, borderRadius: 12, backgroundColor: 'rgba(239, 68, 68, 0.08)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.18)', alignItems: 'center', justifyContent: 'center' },
+  ghostDangerBtnText: { color: '#B91C1C', fontSize: 12, fontWeight: '900' },
+  toggle: { height: 46, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(15, 23, 42, 0.10)', backgroundColor: '#FBFBFA', alignItems: 'center', justifyContent: 'center' },
+  toggleOn: { borderColor: 'rgba(231, 199, 123, 0.75)', backgroundColor: 'rgba(231, 199, 123, 0.18)' },
+  toggleText: { color: 'rgba(15, 23, 42, 0.65)', fontWeight: '900', fontSize: 12 },
+  toggleTextOn: { color: '#0F172A' },
+  formError: { color: '#B91C1C', fontWeight: '900', marginBottom: 10 },
+  saveBtn: { backgroundColor: '#0F172A', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', padding: 16, borderRadius: 16, marginTop: 8, gap: 10 },
+  saveBtnText: { color: 'white', fontSize: 14, fontWeight: '900' },
+  stateWrap: { flex: 1, backgroundColor: '#0B1220', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
+  stateText: { color: 'rgba(248, 250, 252, 0.86)', fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  retryBtn: { marginTop: 8, paddingHorizontal: 16, height: 40, borderRadius: 999, backgroundColor: '#E7C77B', alignItems: 'center', justifyContent: 'center' },
+  retryText: { color: '#0B1220', fontSize: 14, fontWeight: '900' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', padding: 16, justifyContent: 'flex-end' },
+  iconSheet: { backgroundColor: '#F7F6F2', borderRadius: 18, padding: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', maxHeight: '80%' },
+  iconSheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6, paddingBottom: 8 },
+  iconSheetTitle: { color: '#0F172A', fontSize: 14, fontWeight: '900' },
+  searchInput: { height: 42, borderRadius: 12, backgroundColor: 'white', borderWidth: 1, borderColor: 'rgba(15, 23, 42, 0.10)', paddingHorizontal: 12, color: '#0F172A', fontWeight: '800' },
+  iconGrid: { paddingTop: 12, flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  iconCell: { width: '31%', backgroundColor: 'white', borderWidth: 1, borderColor: 'rgba(15, 23, 42, 0.08)', borderRadius: 14, padding: 10 },
+  iconCellSelected: { borderColor: 'rgba(231, 199, 123, 0.90)', backgroundColor: 'rgba(231, 199, 123, 0.16)' },
+  iconCellTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  checkBadge: { width: 20, height: 20, borderRadius: 999, backgroundColor: 'rgba(231, 199, 123, 0.92)', alignItems: 'center', justifyContent: 'center' },
+  iconCellText: { marginTop: 8, color: '#0F172A', fontSize: 11, fontWeight: '900' },
 });

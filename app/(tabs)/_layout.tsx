@@ -1,9 +1,10 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { Home, Briefcase, Calendar, User } from 'lucide-react-native';
+import { Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
-import { Platform } from 'react-native';
 
 export default function TabLayout() {
   const t = useI18nStore((state) => state.t);
@@ -27,30 +28,50 @@ export default function TabLayout() {
         name="home"
         options={{
           title: t('tabHome'),
-          tabBarIcon: ({ color }) => <Home color={color} size={24} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" size={size ?? 24} color={color} />
+          ),
         }}
       />
+
       <Tabs.Screen
         name="services"
         options={{
           title: t('tabServices'),
-          tabBarIcon: ({ color }) => <Briefcase color={color} size={24} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons
+              name="briefcase-outline"
+              size={size ?? 24}
+              color={color}
+            />
+          ),
         }}
       />
+
       <Tabs.Screen
         name="bookings"
         options={{
           title: t('tabBookings'),
-          tabBarIcon: ({ color }) => <Calendar color={color} size={24} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons
+              name="calendar-outline"
+              size={size ?? 24}
+              color={color}
+            />
+          ),
         }}
       />
+
       <Tabs.Screen
         name="account"
         options={{
           title: t('tabAccount'),
-          tabBarIcon: ({ color }) => <User color={color} size={24} />,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" size={size ?? 24} color={color} />
+          ),
         }}
       />
+
       {/* Hide the index route if it exists from template */}
       <Tabs.Screen
         name="index"

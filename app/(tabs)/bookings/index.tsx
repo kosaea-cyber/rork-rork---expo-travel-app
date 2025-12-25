@@ -65,7 +65,8 @@ export default function BookingsScreen() {
       </View>
 
       <Text style={styles.packageTitle} numberOfLines={1}>
-        {item.notes?.trim() ? item.notes.split('\n')[0] : t('booking') ?? 'Booking'}
+        {item.package_id ? `Package: ${item.package_id.slice(0, 8)}` : (t('booking') ?? 'Booking')}
+
       </Text>
 
       <View style={styles.row}>

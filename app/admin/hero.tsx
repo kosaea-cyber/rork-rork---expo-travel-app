@@ -10,8 +10,8 @@ import {
   ActivityIndicator,
   TextInput,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
-import { Plus, Trash2, Save, Image as ImageIcon, Pencil } from 'lucide-react-native';
 import LocalizedInput from '@/components/admin/LocalizedInput';
 import { AsyncImage } from '@/components/AsyncImage';
 import { supabase } from '@/lib/supabase/client';
@@ -93,7 +93,6 @@ export default function ManageHero() {
     is_active: true,
     sort_order: 0,
   });
-
 
   const fetchSlides = useCallback(async () => {
     setLoading(true);
@@ -258,13 +257,13 @@ export default function ManageHero() {
         <View>
           <View style={styles.topRow}>
             <Text style={styles.pageTitle}>Hero Slides</Text>
-            <TouchableOpacity testID="admin-hero-add" style={styles.addButton} onPress={handleCreate}>
-              <Plus color="white" size={20} />
+            <TouchableOpacity testID="admin-hero-add" style={styles.addButton} onPress={handleCreate} activeOpacity={0.85}>
+              <Ionicons name="add" color="white" size={20} />
               <Text style={styles.addButtonText}>Add Slide</Text>
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity testID="admin-hero-refresh" onPress={onRefresh} style={styles.refreshButton}>
+          <TouchableOpacity testID="admin-hero-refresh" onPress={onRefresh} style={styles.refreshButton} activeOpacity={0.85}>
             <Text style={{ color: Colors.tint, fontWeight: '800' }}>{refreshing ? 'Refreshing…' : 'Refresh'}</Text>
           </TouchableOpacity>
 
@@ -327,11 +326,12 @@ export default function ManageHero() {
                       }}
                       disabled={saving || rowSavingId === slide.id}
                       style={styles.miniButton}
+                      activeOpacity={0.85}
                     >
                       {rowSavingId === slide.id ? (
                         <ActivityIndicator color={Colors.tint} />
                       ) : (
-                        <Save size={16} color={Colors.tint} />
+                        <Ionicons name="save-outline" size={16} color={Colors.tint} />
                       )}
                     </TouchableOpacity>
                   </View>
@@ -347,7 +347,11 @@ export default function ManageHero() {
                       try {
                         setRowSavingId(slide.id);
                         const res = await supabase.from('hero_slides').update({ is_active: v }).eq('id', slide.id);
-                        console.log('[admin/hero] toggle is_active', { id: slide.id, is_active: v, error: res.error?.message ?? null });
+                        console.log('[admin/hero] toggle is_active', {
+                          id: slide.id,
+                          is_active: v,
+                          error: res.error?.message ?? null,
+                        });
                         if (res.error) {
                           Alert.alert('Error', res.error.message);
                           await fetchSlides();
@@ -366,15 +370,23 @@ export default function ManageHero() {
               </View>
 
               <View style={styles.actions}>
-                <TouchableOpacity testID={`admin-hero-edit-${slide.id}`} onPress={() => handleEdit(slide)} disabled={saving || rowSavingId === slide.id}>
-                  <Pencil size={18} color={Colors.tint} />
+                <TouchableOpacity
+                  testID={`admin-hero-edit-${slide.id}`}
+                  onPress={() => handleEdit(slide)}
+                  disabled={saving || rowSavingId === slide.id}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="pencil-outline" size={18} color={Colors.tint} />
                 </TouchableOpacity>
+
                 <TouchableOpacity
                   testID={`admin-hero-delete-${slide.id}`}
                   onPress={() => handleDelete(slide)}
                   disabled={saving || rowSavingId === slide.id}
+                  activeOpacity={0.85}
+                  style={{ marginLeft: 10 }}
                 >
-                  <Trash2 size={18} color={Colors.error} style={{ marginLeft: 10 }} />
+                  <Ionicons name="trash-outline" size={18} color={Colors.error} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -394,10 +406,24 @@ export default function ManageHero() {
 
           <View style={styles.section}>
             <Text style={styles.label}>Image</Text>
-            {form.image_url ? <AsyncImage uri={form.image_url} style={styles.previewImage} /> : <View style={styles.placeholderImage} />}
+            {form.image_url ? (
+              <AsyncImage uri={form.image_url} style={styles.previewImage} />
+            ) : (
+              <View style={styles.placeholderImage} />
+            )}
 
-            <TouchableOpacity testID="admin-hero-upload" style={styles.uploadButton} onPress={pickImage} disabled={saving}>
-              {saving ? <ActivityIndicator color="white" /> : <ImageIcon color="white" size={18} />}
+            <TouchableOpacity
+              testID="admin-hero-upload"
+              style={styles.uploadButton}
+              onPress={pickImage}
+              disabled={saving}
+              activeOpacity={0.85}
+            >
+              {saving ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Ionicons name="image-outline" color="white" size={18} />
+              )}
               <Text style={{ color: 'white', marginLeft: 8, fontWeight: '800' }}>Upload</Text>
             </TouchableOpacity>
 
@@ -405,6 +431,7 @@ export default function ManageHero() {
               testID="admin-hero-image-url"
               style={[styles.input, { marginTop: 10 }]}
               placeholder="Or paste image URL…"
+              placeholderTextColor={Colors.textSecondary}
               value={form.image_url}
               onChangeText={(t) => setForm((p) => ({ ...p, image_url: t }))}
               autoCapitalize="none"
@@ -439,24 +466,42 @@ export default function ManageHero() {
               value={String(form.sort_order)}
               onChangeText={(t) => setForm((p) => ({ ...p, sort_order: Number.parseInt(t || '0', 10) || 0 }))}
               placeholder="0"
+              placeholderTextColor={Colors.textSecondary}
             />
           </View>
 
           <View style={styles.row}>
             <Text style={styles.label}>Active</Text>
-            <Switch testID="admin-hero-is-active" value={form.is_active} onValueChange={(v) => setForm((p) => ({ ...p, is_active: v }))} />
+            <Switch
+              testID="admin-hero-is-active"
+              value={form.is_active}
+              onValueChange={(v) => setForm((p) => ({ ...p, is_active: v }))}
+            />
           </View>
 
           <View style={styles.formActions}>
-            <TouchableOpacity testID="admin-hero-cancel" style={[styles.button, styles.cancelButton]} onPress={handleCancel} disabled={saving}>
+            <TouchableOpacity
+              testID="admin-hero-cancel"
+              style={[styles.button, styles.cancelButton]}
+              onPress={handleCancel}
+              disabled={saving}
+              activeOpacity={0.85}
+            >
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity testID="admin-hero-save" style={[styles.button, styles.saveButton]} onPress={handleSave} disabled={saving}>
+
+            <TouchableOpacity
+              testID="admin-hero-save"
+              style={[styles.button, styles.saveButton]}
+              onPress={handleSave}
+              disabled={saving}
+              activeOpacity={0.85}
+            >
               {saving ? (
                 <ActivityIndicator color="white" />
               ) : (
                 <>
-                  <Save color="white" size={18} />
+                  <Ionicons name="save-outline" color="white" size={18} />
                   <Text style={styles.saveText}>Save</Text>
                 </>
               )}
@@ -475,7 +520,7 @@ export default function ManageHero() {
         <View style={styles.stateWrap} testID="admin-hero-error">
           <Text style={styles.stateTitle}>Couldn’t load hero slides</Text>
           <Text style={styles.stateText}>{errorMessage}</Text>
-          <TouchableOpacity testID="admin-hero-retry" onPress={fetchSlides} style={styles.stateButton}>
+          <TouchableOpacity testID="admin-hero-retry" onPress={fetchSlides} style={styles.stateButton} activeOpacity={0.85}>
             <Text style={styles.stateButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>

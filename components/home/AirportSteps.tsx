@@ -1,16 +1,17 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Plane, FileText, Hotel, Car, CheckCircle } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 
 const steps = [
-  { icon: FileText, title: 'Planning' },
-  { icon: Plane, title: 'Arrival' },
-  { icon: Car, title: 'Transfer' },
-  { icon: Hotel, title: 'Stay' },
-  { icon: CheckCircle, title: 'Enjoy' },
-];
+  { icon: 'document-text-outline', title: 'Planning' },
+  { icon: 'airplane-outline', title: 'Arrival' },
+  { icon: 'car-outline', title: 'Transfer' },
+  { icon: 'bed-outline', title: 'Stay' },
+  { icon: 'checkmark-circle-outline', title: 'Enjoy' },
+] as const;
 
 export default function AirportSteps() {
   const t = useI18nStore((state) => state.t);
@@ -18,19 +19,18 @@ export default function AirportSteps() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{t('airportSteps')}</Text>
+
       <View style={styles.stepsContainer}>
-        {steps.map((Step, index) => {
-           const Icon = Step.icon;
-           return (
-            <View key={index} style={styles.stepItem}>
-              <View style={styles.iconCircle}>
-                <Icon color={Colors.tint} size={20} />
-              </View>
-              {index < steps.length - 1 && <View style={styles.line} />}
-              <Text style={styles.stepText}>{Step.title}</Text>
+        {steps.map((step, index) => (
+          <View key={`${step.title}-${index}`} style={styles.stepItem}>
+            <View style={styles.iconCircle}>
+              <Ionicons name={step.icon} color={Colors.tint} size={20} />
             </View>
-           );
-        })}
+
+            {/* لو بدك خطوط بين الخطوات لاحقاً نعملها بشكل نظيف (سهل) */}
+            <Text style={styles.stepText}>{step.title}</Text>
+          </View>
+        ))}
       </View>
     </View>
   );
@@ -67,21 +67,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
-    zIndex: 1,
-  },
-  line: {
-    position: 'absolute',
-    top: 20,
-    left: 40, // Half width + offset
-    width: 40, // Distance to next
-    height: 1,
-    backgroundColor: Colors.border,
-    zIndex: 0,
-    // Note: This static line approach is tricky with flex. 
-    // Simplified for demo: just removing lines for now to keep it clean or use absolute positioning if needed.
-    // Let's remove the line for simplicity in this flex layout or implement better.
-    // Hiding line for now.
-    display: 'none',
   },
   stepText: {
     color: Colors.textSecondary,

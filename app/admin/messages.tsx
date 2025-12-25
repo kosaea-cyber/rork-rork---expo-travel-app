@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { MessageCirclePlus, RefreshCw } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import colors from '@/constants/colors';
 import { type Conversation, useChatStore } from '@/store/chatStore';
@@ -23,17 +23,18 @@ function formatCustomer(customerId: string | null): string {
 
 export default function AdminMessagesPage() {
   const router = useRouter();
-
   const { adminFetchConversations, adminCreatePublicConversationIfMissing } = useChatStore();
 
   const [items, setItems] = useState<RowItem[]>([]);
   const [ui, setUi] = useState<UiState>({ status: 'loading' });
 
+  // تحميل مستقل لزر Create Public Chat
+  const [creatingPublic, setCreatingPublic] = useState(false);
+
   const load = useCallback(async () => {
     setUi({ status: 'loading' });
 
     try {
-      console.log('[admin/messages] load conversations');
       const data = await adminFetchConversations(PAGE_LIMIT);
       setItems(data);
       setUi({ status: 'ready' });
@@ -49,10 +50,9 @@ export default function AdminMessagesPage() {
   }, [load]);
 
   const onCreatePublic = useCallback(async () => {
-    setUi({ status: 'loading' });
+    setCreatingPublic(true);
 
     try {
-      console.log('[admin/messages] create public chat');
       const conv = await adminCreatePublicConversationIfMissing();
       if (conv) {
         await load();
@@ -64,33 +64,49 @@ export default function AdminMessagesPage() {
     } catch (e) {
       console.error('[admin/messages] create public chat failed', e);
       setUi({ status: 'error', message: 'Could not create public chat. Please try again.' });
+    } finally {
+      setCreatingPublic(false);
     }
   }, [adminCreatePublicConversationIfMissing, load, router]);
 
-  const header = useMemo(() => {
-    return (
-      <View style={styles.headerWrap}>
-        <View style={styles.headerTop}>
-          <Text style={styles.title}>Conversations</Text>
-          <Pressable testID="adminMessages.createPublic" style={styles.createBtn} onPress={onCreatePublic}>
-            <MessageCirclePlus size={18} color={colors.background} />
-            <Text style={styles.createBtnText}>Create Public Chat</Text>
-          </Pressable>
-        </View>
+  const header = useMemo(() => (
+    <View style={styles.headerWrap}>
+      <View style={styles.headerTop}>
+        <Text style={styles.title}>Conversations</Text>
 
-        <View style={styles.legendRow}>
-          <Text style={[styles.legendCell, { flex: 0.9 }]}>Type</Text>
-          <Text style={[styles.legendCell, { flex: 1.35 }]}>Customer</Text>
-          <Text style={[styles.legendCell, { flex: 1.1, textAlign: 'right' }]}>Last</Text>
-        </View>
+        <Pressable
+          testID="adminMessages.createPublic"
+          style={({ pressed }) => [
+            styles.createBtn,
+            pressed && { opacity: 0.9 },
+            creatingPublic && { opacity: 0.7 },
+          ]}
+          onPress={onCreatePublic}
+          disabled={creatingPublic}
+        >
+          {creatingPublic ? (
+            <ActivityIndicator size="small" color={colors.background} />
+          ) : (
+            <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.background} />
+          )}
+          <Text style={styles.createBtnText}>
+            {creatingPublic ? 'Creating…' : 'Create Public Chat'}
+          </Text>
+        </Pressable>
       </View>
-    );
-  }, [onCreatePublic]);
+
+      <View style={styles.legendRow}>
+        <Text style={[styles.legendCell, { flex: 0.9 }]}>Type</Text>
+        <Text style={[styles.legendCell, { flex: 1.35 }]}>Customer</Text>
+        <Text style={[styles.legendCell, { flex: 1.1, textAlign: 'right' }]}>Last</Text>
+      </View>
+    </View>
+  ), [creatingPublic, onCreatePublic]);
 
   const empty = useMemo(() => {
     if (ui.status === 'loading') {
       return (
-        <View style={styles.stateWrap} testID="adminMessages.loading">
+        <View style={styles.stateWrap}>
           <ActivityIndicator color={colors.tint} />
           <Text style={styles.stateTitle}>Loading conversations…</Text>
         </View>
@@ -99,11 +115,11 @@ export default function AdminMessagesPage() {
 
     if (ui.status === 'error') {
       return (
-        <View style={styles.stateWrap} testID="adminMessages.error">
+        <View style={styles.stateWrap}>
           <Text style={styles.stateTitle}>Couldn’t load conversations</Text>
           <Text style={styles.stateText}>{ui.message}</Text>
-          <Pressable testID="adminMessages.retry" style={styles.retryBtn} onPress={load}>
-            <RefreshCw size={16} color={colors.background} />
+          <Pressable style={styles.retryBtn} onPress={load}>
+            <Ionicons name="refresh" size={16} color={colors.background} />
             <Text style={styles.retryText}>Retry</Text>
           </Pressable>
         </View>
@@ -111,9 +127,11 @@ export default function AdminMessagesPage() {
     }
 
     return (
-      <View style={styles.stateWrap} testID="adminMessages.empty">
+      <View style={styles.stateWrap}>
         <Text style={styles.stateTitle}>No conversations yet</Text>
-        <Text style={styles.stateText}>Create a public chat, or wait for customers to message you.</Text>
+        <Text style={styles.stateText}>
+          Create a public chat, or wait for customers to message you.
+        </Text>
       </View>
     );
   }, [load, ui]);
@@ -125,7 +143,6 @@ export default function AdminMessagesPage() {
 
       return (
         <Pressable
-          testID={`adminMessages.row.${item.id}`}
           style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
           onPress={() => router.push(`/admin/message/${item.id}`)}
         >
@@ -169,20 +186,19 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 20,
+    flexGrow: 1,
   },
   headerWrap: {
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 12,
-    backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   headerTop: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    alignItems: 'center',
   },
   title: {
     fontSize: 20,
@@ -206,7 +222,6 @@ const styles = StyleSheet.create({
   legendRow: {
     marginTop: 12,
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 10,
   },
   legendCell: {
@@ -214,7 +229,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
   },
   row: {
     flexDirection: 'row',
@@ -224,22 +238,18 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    backgroundColor: colors.background,
   },
   typeChip: {
     flex: 0.9,
-    maxWidth: 88,
     height: 26,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
   },
   typeChipText: {
     color: 'white',
     fontSize: 12,
     fontWeight: '900',
-    textTransform: 'uppercase',
   },
   customerText: {
     flex: 1.35,
@@ -251,26 +261,26 @@ const styles = StyleSheet.create({
     flex: 1.1,
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '700',
     textAlign: 'right',
   },
   stateWrap: {
+    flex: 1,
     padding: 32,
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 10,
   },
   stateTitle: {
-    color: colors.text,
-    fontWeight: '900',
     fontSize: 15,
+    fontWeight: '900',
+    color: colors.text,
     textAlign: 'center',
   },
   stateText: {
-    color: colors.textSecondary,
-    fontWeight: '700',
     fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 18,
   },
   retryBtn: {
     marginTop: 6,
@@ -285,6 +295,5 @@ const styles = StyleSheet.create({
   retryText: {
     color: colors.background,
     fontWeight: '900',
-    fontSize: 13,
   },
 });

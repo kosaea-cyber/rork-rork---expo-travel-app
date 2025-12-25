@@ -9,7 +9,7 @@ import {
   ImageBackground,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { AlertTriangle, RefreshCcw } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import Colors from '@/constants/colors';
@@ -144,12 +144,12 @@ export default function ServiceCategories() {
       return (
         <View style={styles.stateWrap}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <AlertTriangle size={18} color={Colors.textSecondary} />
+            <Ionicons name="warning-outline" size={18} color={Colors.textSecondary} />
             <Text style={styles.stateText}>Couldn’t load categories.</Text>
           </View>
 
           <TouchableOpacity style={styles.retryBtn} onPress={loadCategories}>
-            <RefreshCcw size={16} color={Colors.background} />
+            <Ionicons name="refresh" size={16} color={Colors.background} />
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>

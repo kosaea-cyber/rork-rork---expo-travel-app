@@ -1,11 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { LayoutDashboard, Package, Calendar, LogOut, FileText, Edit3, Users, MessageSquare, Image as ImageIcon, Sparkles } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+
 import Colors from '@/constants/colors';
 import { useAuthStore } from '@/store/authStore';
 import { useI18nStore } from '@/constants/i18n';
 import { supabase } from '@/lib/supabase/client';
+
+type MenuItem = {
+  title: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  route: string;
+  color: string;
+  description: string;
+  badge?: number | string;
+};
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -18,6 +28,7 @@ export default function AdminDashboard() {
     pendingBookings: number;
     openConversations: number;
   } | null>(null);
+
   const [isLoadingStats, setIsLoadingStats] = useState<boolean>(true);
   const [statsError, setStatsError] = useState<string | null>(null);
 
@@ -74,28 +85,28 @@ export default function AdminDashboard() {
     loadStats();
   }, [loadStats]);
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     await logout();
     router.replace('/auth/welcome');
-  };
+  }, [logout, router]);
 
   const totalCustomers = stats?.totalCustomers ?? 0;
   const totalBookings = stats?.totalBookings ?? 0;
   const pendingBookings = stats?.pendingBookings ?? 0;
   const openConversations = stats?.openConversations ?? 0;
 
-  const menuItems = useMemo(
+  const menuItems = useMemo<MenuItem[]>(
     () => [
       {
         title: t('adminCustomers'),
-        icon: Users,
+        iconName: 'people-outline',
         route: '/admin/customers',
         color: '#E91E63',
         description: 'Manage users & profiles',
       },
       {
         title: t('adminBookings'),
-        icon: Calendar,
+        iconName: 'calendar-outline',
         route: '/admin/bookings',
         color: '#FF9800',
         description: 'View and manage bookings',
@@ -103,7 +114,7 @@ export default function AdminDashboard() {
       },
       {
         title: t('adminMessages'),
-        icon: MessageSquare,
+        iconName: 'chatbubble-ellipses-outline',
         route: '/admin/messages',
         color: '#2196F3',
         description: 'Chat with customers',
@@ -111,49 +122,49 @@ export default function AdminDashboard() {
       },
       {
         title: 'AI Settings',
-        icon: Sparkles,
+        iconName: 'sparkles-outline',
         route: '/admin/ai',
         color: '#10B981',
         description: 'Configure chat AI behavior',
       },
       {
         title: t('adminServices'),
-        icon: LayoutDashboard,
+        iconName: 'grid-outline',
         route: '/admin/services',
         color: '#4CAF50',
         description: 'Manage service categories',
       },
       {
         title: t('adminPackages'),
-        icon: Package,
+        iconName: 'cube-outline',
         route: '/admin/packages',
         color: '#9C27B0',
         description: 'Manage travel packages',
       },
       {
         title: t('adminBlogs'),
-        icon: FileText,
+        iconName: 'document-text-outline',
         route: '/admin/blogs',
         color: '#673AB7',
         description: 'Manage blog posts',
       },
       {
         title: t('adminContent'),
-        icon: Edit3,
+        iconName: 'create-outline',
         route: '/admin/content',
         color: '#607D8B',
         description: 'Edit static content',
       },
       {
         title: 'Hero Slider',
-        icon: ImageIcon,
+        iconName: 'images-outline',
         route: '/admin/hero',
         color: '#E91E63',
         description: 'Manage homepage slider',
       },
       {
         title: 'App Images',
-        icon: ImageIcon,
+        iconName: 'image-outline',
         route: '/admin/images',
         color: '#FF5722',
         description: 'Manage backgrounds & global images',
@@ -162,9 +173,8 @@ export default function AdminDashboard() {
     [openConversations, pendingBookings, t]
   );
 
-
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }}>
       <View style={styles.header}>
         <Text style={styles.welcome}>{t('adminDashboard')}</Text>
         <Text style={styles.subtitle}>Manage your application content</Text>
@@ -180,6 +190,7 @@ export default function AdminDashboard() {
             )}
             <Text style={styles.statLabel}>{t('totalCustomers')}</Text>
           </View>
+
           <View style={styles.statBox}>
             {isLoadingStats ? (
               <ActivityIndicator color={Colors.tint} />
@@ -190,6 +201,7 @@ export default function AdminDashboard() {
             )}
             <Text style={styles.statLabel}>{t('activeBookings')}</Text>
           </View>
+
           <View style={styles.statBox}>
             {isLoadingStats ? (
               <ActivityIndicator color={Colors.tint} />
@@ -203,11 +215,7 @@ export default function AdminDashboard() {
         </View>
 
         {statsError ? (
-          <TouchableOpacity
-            style={styles.errorPill}
-            onPress={loadStats}
-            testID="admin-stats-error"
-          >
+          <TouchableOpacity style={styles.errorPill} onPress={loadStats} testID="admin-stats-error">
             <Text style={styles.errorText} numberOfLines={2}>
               {statsError}
             </Text>
@@ -218,18 +226,21 @@ export default function AdminDashboard() {
 
       <View style={styles.grid}>
         {menuItems.map((item, index) => (
-          <TouchableOpacity 
-            key={index} 
+          <TouchableOpacity
+            key={index}
             style={styles.card}
             onPress={() => router.push(item.route as any)}
+            activeOpacity={0.9}
           >
             <View style={[styles.iconContainer, { backgroundColor: item.color + '20' }]}>
-              <item.icon size={32} color={item.color} />
+              <Ionicons name={item.iconName} size={28} color={item.color} />
             </View>
+
             <View style={styles.cardContent}>
               <Text style={styles.cardTitle}>{item.title}</Text>
               <Text style={styles.cardDescription}>{item.description}</Text>
             </View>
+
             {item.badge ? (
               <View style={[styles.badge, typeof item.badge === 'string' ? { minWidth: 60 } : {}]}>
                 <Text style={styles.badgeText}>{item.badge}</Text>
@@ -239,8 +250,8 @@ export default function AdminDashboard() {
         ))}
       </View>
 
-      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-        <LogOut size={20} color={Colors.error} />
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.85}>
+        <Ionicons name="log-out-outline" size={20} color={Colors.error} />
         <Text style={styles.logoutText}>{t('logout')}</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -248,32 +259,17 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: {
     padding: 24,
     backgroundColor: Colors.background,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  welcome: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: Colors.tint,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-    marginTop: 4,
-    marginBottom: 20,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
+  welcome: { fontSize: 24, fontWeight: 'bold', color: Colors.tint },
+  subtitle: { fontSize: 16, color: Colors.textSecondary, marginTop: 4, marginBottom: 20 },
+
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
   statBox: {
     flex: 1,
     backgroundColor: '#ffffff20',
@@ -281,21 +277,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
-  statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: Colors.tint,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  grid: {
-    padding: 16,
-    gap: 16,
-  },
+  statValue: { fontSize: 20, fontWeight: 'bold', color: Colors.tint },
+  statLabel: { fontSize: 12, color: Colors.textSecondary, marginTop: 2, textAlign: 'center' },
+
+  grid: { padding: 16, gap: 16 },
   card: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -316,19 +301,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 16,
   },
-  cardContent: {
-    flex: 1,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-  },
-  cardDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 2,
-  },
+  cardContent: { flex: 1 },
+  cardTitle: { fontSize: 18, fontWeight: '600', color: '#333' },
+  cardDescription: { fontSize: 14, color: '#666', marginTop: 2 },
+
   badge: {
     backgroundColor: Colors.error,
     borderRadius: 12,
@@ -337,25 +313,18 @@ const styles = StyleSheet.create({
     minWidth: 24,
     alignItems: 'center',
   },
-  badgeText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
+  badgeText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
+
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
-    marginTop: 24,
-    marginBottom: 40,
+    marginTop: 8,
     gap: 8,
   },
-  logoutText: {
-    color: Colors.error,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  logoutText: { color: Colors.error, fontSize: 16, fontWeight: '600' },
+
   errorPill: {
     marginTop: 14,
     paddingVertical: 10,
@@ -365,15 +334,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.error,
     backgroundColor: '#FFF5F5',
   },
-  errorText: {
-    color: '#8A1C1C',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  retryText: {
-    marginTop: 4,
-    color: Colors.error,
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  errorText: { color: '#8A1C1C', fontSize: 13, fontWeight: '600' },
+  retryText: { marginTop: 4, color: Colors.error, fontSize: 12, fontWeight: '700' },
 });

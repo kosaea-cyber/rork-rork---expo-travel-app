@@ -1,8 +1,8 @@
 import React, { useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
-import { useI18nStore, Language } from '@/constants/i18n';
-import { Check } from 'lucide-react-native';
+import { useI18nStore, type Language } from '@/constants/i18n';
 import { useAuthStore } from '@/store/authStore';
 import { supabase } from '@/lib/supabase/client';
 
@@ -36,51 +36,45 @@ export default function SettingsScreen() {
     [setLanguage, user]
   );
 
+  const CheckIcon = ({ visible }: { visible: boolean }) =>
+    visible ? <Ionicons name="checkmark" size={22} color={Colors.tint} /> : <View style={{ width: 22 }} />;
+
   return (
     <View style={styles.container}>
       <Text style={styles.sectionTitle}>{t('language')}</Text>
-      
+
       <View style={styles.card}>
-        <TouchableOpacity 
-          style={styles.option} 
-          onPress={() => toggleLanguage('en')}
-        >
+        <TouchableOpacity style={styles.option} onPress={() => toggleLanguage('en')} activeOpacity={0.8}>
           <Text style={styles.optionText}>English</Text>
-          {language === 'en' && <Check color={Colors.tint} size={20} />}
+          <CheckIcon visible={language === 'en'} />
         </TouchableOpacity>
-        
-        <View style={styles.divider} />
-        
-        <TouchableOpacity 
-          style={styles.option} 
-          onPress={() => toggleLanguage('ar')}
-        >
-          <Text style={styles.optionText}>العربية</Text>
-          {language === 'ar' && <Check color={Colors.tint} size={20} />}
-        </TouchableOpacity>
-        
+
         <View style={styles.divider} />
 
-        <TouchableOpacity 
-          style={styles.option} 
-          onPress={() => toggleLanguage('de')}
-        >
+        <TouchableOpacity style={styles.option} onPress={() => toggleLanguage('ar')} activeOpacity={0.8}>
+          <Text style={styles.optionText}>العربية</Text>
+          <CheckIcon visible={language === 'ar'} />
+        </TouchableOpacity>
+
+        <View style={styles.divider} />
+
+        <TouchableOpacity style={styles.option} onPress={() => toggleLanguage('de')} activeOpacity={0.8}>
           <Text style={styles.optionText}>Deutsch</Text>
-          {language === 'de' && <Check color={Colors.tint} size={20} />}
+          <CheckIcon visible={language === 'de'} />
         </TouchableOpacity>
       </View>
 
       <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Contact Info</Text>
       <View style={styles.card}>
-         <View style={styles.infoRow}>
-            <Text style={styles.label}>Phone</Text>
-            <Text style={styles.value}>+965 1234 5678</Text>
-         </View>
-         <View style={styles.divider} />
-         <View style={styles.infoRow}>
-            <Text style={styles.label}>Email</Text>
-            <Text style={styles.value}>info@ruwasielite.com</Text>
-         </View>
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Phone</Text>
+          <Text style={styles.value}>+965 1234 5678</Text>
+        </View>
+        <View style={styles.divider} />
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Email</Text>
+          <Text style={styles.value}>info@ruwasielite.com</Text>
+        </View>
       </View>
     </View>
   );
@@ -126,12 +120,12 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   label: {
-     color: Colors.textSecondary,
-     fontSize: 14,
+    color: Colors.textSecondary,
+    fontSize: 14,
   },
   value: {
-      color: Colors.text,
-      fontSize: 14,
-      fontWeight: '600',
-  }
+    color: Colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
 });

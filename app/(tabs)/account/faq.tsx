@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Pressable } from 'react-native';
-import { ChevronDown, ChevronUp } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
 import { useProfileStore, type PreferredLanguage } from '@/store/profileStore';
@@ -46,7 +46,12 @@ function Accordion({ item, lang }: { item: FaqRow; lang: PreferredLanguage }) {
         <View style={{ flex: 1 }}>
           <Text style={styles.question}>{question}</Text>
         </View>
-        {expanded ? <ChevronUp color={Colors.tint} size={20} /> : <ChevronDown color={Colors.textSecondary} size={20} />}
+
+        <Ionicons
+          name={expanded ? 'chevron-up' : 'chevron-down'}
+          color={expanded ? Colors.tint : Colors.textSecondary}
+          size={20}
+        />
       </TouchableOpacity>
 
       {expanded ? (
@@ -73,9 +78,7 @@ export default function FAQScreen() {
       console.log('[faq] fetching faq_items');
       const { data, error } = await supabase
         .from('faq_items')
-        .select(
-          'id,is_active,sort_order,question_en,question_ar,question_de,answer_en,answer_ar,answer_de'
-        )
+        .select('id,is_active,sort_order,question_en,question_ar,question_de,answer_en,answer_ar,answer_de')
         .eq('is_active', true)
         .order('sort_order', { ascending: true, nullsFirst: false });
 

@@ -13,7 +13,8 @@ import {
   View,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, Shield, ShieldOff, Save, Ban, CheckCircle, Phone, Globe2, CalendarDays, UserRound } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 
@@ -116,7 +117,6 @@ export default function CustomerDetail() {
     loadProfile().catch((e) => console.error('[admin/customer] initial load error', e));
   }, [loadProfile]);
 
-
   const canSave = useMemo(() => {
     if (!profile) return false;
     return true;
@@ -128,17 +128,13 @@ export default function CustomerDetail() {
       if (nextRole === current) return true;
 
       return await new Promise<boolean>((resolve) => {
-        Alert.alert(
-          'Confirm role change',
-          `${safeName(profile)} will become ${roleLabel(nextRole)}.`,
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Confirm', style: 'destructive', onPress: () => resolve(true) },
-          ]
-        );
+        Alert.alert('Confirm role change', `${safeName(profile)} will become ${roleLabel(nextRole)}.`, [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Confirm', style: 'destructive', onPress: () => resolve(true) },
+        ]);
       });
     },
-    [profile]
+    [profile],
   );
 
   const showToast = useCallback(
@@ -164,7 +160,7 @@ export default function CustomerDetail() {
         ]).start();
       }, 1500);
     },
-    [toastOpacity, toastTranslateY]
+    [toastOpacity, toastTranslateY],
   );
 
   useEffect(() => {
@@ -204,7 +200,19 @@ export default function CustomerDetail() {
     } finally {
       setSaving(false);
     }
-  }, [canSave, confirmRoleChangeIfNeeded, fullName, id, isBlocked, loadProfile, phone, preferredLanguage, profile, role, showToast]);
+  }, [
+    canSave,
+    confirmRoleChangeIfNeeded,
+    fullName,
+    id,
+    isBlocked,
+    loadProfile,
+    phone,
+    preferredLanguage,
+    profile,
+    role,
+    showToast,
+  ]);
 
   const onToggleBlocked = useCallback(() => {
     if (!profile) return;
@@ -212,9 +220,7 @@ export default function CustomerDetail() {
 
     Alert.alert(
       next ? 'Disable account?' : 'Re-enable account?',
-      next
-        ? 'This user will be blocked from logging in.'
-        : 'This user will be allowed to log in again.',
+      next ? 'This user will be blocked from logging in.' : 'This user will be allowed to log in again.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -222,7 +228,7 @@ export default function CustomerDetail() {
           style: 'destructive',
           onPress: () => setIsBlocked(next),
         },
-      ]
+      ],
     );
   }, [isBlocked, profile]);
 
@@ -282,19 +288,20 @@ export default function CustomerDetail() {
         >
           <Text style={styles.toastText}>{toastText}</Text>
         </Animated.View>
+
         <View style={styles.hero}>
           <TouchableOpacity testID="adminCustomerBack" onPress={() => router.back()} style={styles.backBtn}>
-            <ArrowLeft size={18} color={Colors.text} />
+            <Ionicons name="arrow-back" size={18} color={Colors.text} />
             <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
 
           <View style={styles.heroMeta}>
             <View style={styles.heroBadge}>
-              <UserRound size={14} color={Colors.textSecondary} />
+              <Ionicons name="person-circle-outline" size={14} color={Colors.textSecondary} />
               <Text style={styles.heroBadgeText}>{profile.id}</Text>
             </View>
             <View style={styles.heroBadge}>
-              <CalendarDays size={14} color={Colors.textSecondary} />
+              <Ionicons name="calendar-outline" size={14} color={Colors.textSecondary} />
               <Text style={styles.heroBadgeText}>{formatDateLong(profile.created_at)}</Text>
             </View>
           </View>
@@ -304,15 +311,19 @@ export default function CustomerDetail() {
           <View style={styles.heroChips}>
             <View style={[styles.chip, isRoleAdmin ? styles.chipAdmin : styles.chipCustomer]}>
               {isRoleAdmin ? (
-                <Shield size={14} color={isRoleAdmin ? '#FFD369' : Colors.textSecondary} />
+                <Ionicons name="shield-checkmark-outline" size={14} color={'#FFD369'} />
               ) : (
-                <ShieldOff size={14} color={isRoleAdmin ? '#FFD369' : Colors.textSecondary} />
+                <Ionicons name="shield-outline" size={14} color={Colors.textSecondary} />
               )}
               <Text style={[styles.chipText, isRoleAdmin ? styles.chipTextAdmin : null]}>{roleLabel(role)}</Text>
             </View>
 
             <View style={[styles.chip, isBlocked ? styles.chipBlocked : styles.chipOk]}>
-              {isBlocked ? <Ban size={14} color="#FF5A7A" /> : <CheckCircle size={14} color="#42D39E" />}
+              {isBlocked ? (
+                <Ionicons name="ban-outline" size={14} color="#FF5A7A" />
+              ) : (
+                <Ionicons name="checkmark-circle-outline" size={14} color="#42D39E" />
+              )}
               <Text style={[styles.chipText, isBlocked ? styles.chipTextBlocked : styles.chipTextOk]}>
                 {isBlocked ? 'Blocked' : 'Active'}
               </Text>
@@ -338,7 +349,7 @@ export default function CustomerDetail() {
           <View style={styles.field}>
             <Text style={styles.label}>Phone</Text>
             <View style={styles.inputRow}>
-              <Phone size={16} color={Colors.textSecondary} />
+              <Ionicons name="call-outline" size={16} color={Colors.textSecondary} />
               <TextInput
                 testID="adminCustomerPhone"
                 style={styles.inputRowInput}
@@ -360,13 +371,8 @@ export default function CustomerDetail() {
                   style={[styles.segment, preferredLanguage === l && styles.segmentActive]}
                   onPress={() => setPreferredLanguage(l)}
                 >
-                  <Globe2 size={14} color={preferredLanguage === l ? '#7AA2F7' : Colors.textSecondary} />
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      preferredLanguage === l && { color: '#7AA2F7' },
-                    ]}
-                  >
+                  <Ionicons name="globe-outline" size={14} color={preferredLanguage === l ? '#7AA2F7' : Colors.textSecondary} />
+                  <Text style={[styles.segmentText, preferredLanguage === l && { color: '#7AA2F7' }]}>
                     {l.toUpperCase()}
                   </Text>
                 </TouchableOpacity>
@@ -382,14 +388,12 @@ export default function CustomerDetail() {
                   key={r}
                   testID={`adminCustomerRole-${r}`}
                   style={[styles.segment, role === r && styles.segmentActiveRole]}
-                  onPress={() => {
-                    setRole(r);
-                  }}
+                  onPress={() => setRole(r)}
                 >
                   {r === 'admin' ? (
-                    <Shield size={14} color={role === r ? '#FFD369' : Colors.textSecondary} />
+                    <Ionicons name="shield-checkmark-outline" size={14} color={role === r ? '#FFD369' : Colors.textSecondary} />
                   ) : (
-                    <ShieldOff size={14} color={role === r ? '#FFD369' : Colors.textSecondary} />
+                    <Ionicons name="shield-outline" size={14} color={role === r ? '#FFD369' : Colors.textSecondary} />
                   )}
                   <Text style={[styles.segmentText, role === r && { color: '#FFD369' }]}>{roleLabel(r)}</Text>
                 </TouchableOpacity>
@@ -410,7 +414,7 @@ export default function CustomerDetail() {
               <ActivityIndicator color={Colors.background} />
             ) : (
               <>
-                <Save size={16} color={Colors.background} />
+                <Ionicons name="save-outline" size={16} color={Colors.background} />
                 <Text style={styles.saveText}>Save changes</Text>
               </>
             )}
@@ -426,7 +430,11 @@ export default function CustomerDetail() {
             style={[styles.blockBtn, isBlocked ? styles.blockBtnEnabled : styles.blockBtnDisabled]}
             onPress={onToggleBlocked}
           >
-            {isBlocked ? <CheckCircle size={16} color="#42D39E" /> : <Ban size={16} color="#FF5A7A" />}
+            {isBlocked ? (
+              <Ionicons name="checkmark-circle-outline" size={16} color="#42D39E" />
+            ) : (
+              <Ionicons name="ban-outline" size={16} color="#FF5A7A" />
+            )}
             <Text style={[styles.blockBtnText, isBlocked ? { color: '#42D39E' } : { color: '#FF5A7A' }]}>
               {isBlocked ? 'Re-enable account' : 'Disable account'}
             </Text>

@@ -12,7 +12,8 @@ import {
   View,
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Edit2, Plus, Save, Trash2, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 import { deleteStorageObjectByPublicUrl } from '@/lib/supabase/storageUpload';
@@ -316,14 +317,11 @@ export default function AdminPackages() {
 
               <View style={styles.actions}>
                 <Pressable testID={`admin-package-edit-${item.id}`} onPress={() => openEdit(item)} style={styles.actionBtn}>
-                  <Edit2 size={20} color={Colors.tint} />
+                  <Ionicons name="pencil-outline" size={20} color={Colors.tint} />
                 </Pressable>
-                <Pressable
-                  testID={`admin-package-delete-${item.id}`}
-                  onPress={() => onDelete(item)}
-                  style={styles.actionBtn}
-                >
-                  <Trash2 size={20} color={Colors.error} />
+
+                <Pressable testID={`admin-package-delete-${item.id}`} onPress={() => onDelete(item)} style={styles.actionBtn}>
+                  <Ionicons name="trash-outline" size={20} color={Colors.error} />
                 </Pressable>
               </View>
             </View>
@@ -374,7 +372,7 @@ export default function AdminPackages() {
   return (
     <View style={styles.container} testID="admin-packages">
       <Pressable testID="admin-packages-add" style={styles.addBtn} onPress={openNew}>
-        <Plus size={22} color="white" />
+        <Ionicons name="add" size={22} color="white" />
         <Text style={styles.addBtnText}>Add Package</Text>
       </Pressable>
 
@@ -405,7 +403,7 @@ export default function AdminPackages() {
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>{editing?.id ? 'Edit Package' : 'New Package'}</Text>
             <Pressable testID="admin-packages-modal-close" onPress={closeModal}>
-              <X size={24} color="#333" />
+              <Ionicons name="close" size={24} color="#333" />
             </Pressable>
           </View>
 
@@ -425,7 +423,7 @@ export default function AdminPackages() {
                       ? categoryLabelById.get(editing.category_id) ?? editing.category_id
                       : 'Select a category'}
                   </Text>
-                  <ChevronDown size={18} color="#333" />
+                  <Ionicons name="chevron-down" size={18} color="#333" />
                 </Pressable>
 
                 <Modal
@@ -462,7 +460,9 @@ export default function AdminPackages() {
                                 </Text>
                                 {inactive ? <Text style={styles.pickerRowMeta}>Inactive</Text> : null}
                               </View>
-                              {isSelected ? <Text style={styles.pickerCheck}>✓</Text> : null}
+                              {isSelected ? (
+                                <Ionicons name="checkmark" size={18} color={Colors.tint} />
+                              ) : null}
                             </Pressable>
                           );
                         })}
@@ -561,9 +561,7 @@ export default function AdminPackages() {
                     style={[styles.chip, editing.price_type === 'starting_from' && styles.chipActive]}
                     onPress={() => setEditing({ ...editing, price_type: 'starting_from' })}
                   >
-                    <Text
-                      style={[styles.chipText, editing.price_type === 'starting_from' && styles.chipTextActive]}
-                    >
+                    <Text style={[styles.chipText, editing.price_type === 'starting_from' && styles.chipTextActive]}>
                       Starting from
                     </Text>
                   </Pressable>
@@ -598,7 +596,11 @@ export default function AdminPackages() {
                 </View>
 
                 <Pressable testID="admin-package-save" style={styles.saveBtn} onPress={onSave} disabled={saving}>
-                  {saving ? <ActivityIndicator color="white" /> : <Save size={18} color="white" />}
+                  {saving ? (
+                    <ActivityIndicator color="white" />
+                  ) : (
+                    <Ionicons name="save-outline" size={18} color="white" />
+                  )}
                   <Text style={styles.saveBtnText}>{saving ? 'Saving…' : 'Save'}</Text>
                 </Pressable>
               </>

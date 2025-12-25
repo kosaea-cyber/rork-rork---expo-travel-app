@@ -14,20 +14,20 @@ import {
 } from 'react-native';
 import { Stack } from 'expo-router';
 
-import colors from '@/constants/colors';
+import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 
 type AiMode = 'off' | 'auto_reply' | 'human_handoff';
 
 type AiSettingsRow = {
   id?: string;
-  key?: string | null;
-  is_enabled: boolean;
-  mode: AiMode;
-  public_chat_enabled: boolean;
-  private_chat_enabled: boolean;
-  system_prompt: string | null;
-  prompts?: Record<string, string> | null;
+  key?: string | null; // قد لا تكون موجودة فعلياً بجدولك
+  is_enabled: boolean | null;
+  mode: AiMode | string | null;
+  public_chat_enabled: boolean | null;
+  private_chat_enabled: boolean | null;
+  system_prompt: string | null; // موجود بجدولك
+  prompts?: Record<string, string> | null; // إذا كان موجود (json/jsonb)
   updated_at?: string | null;
 };
 
@@ -37,14 +37,12 @@ type UiState =
   | { status: 'saving' }
   | { status: 'error'; message: string };
 
-const DEFAULT_SETTINGS: Omit<AiSettingsRow, 'id' | 'updated_at'> = {
-  key: 'default',
+const DEFAULTS = {
   is_enabled: false,
-  mode: 'off',
+  mode: 'off' as AiMode,
   public_chat_enabled: true,
   private_chat_enabled: true,
-  system_prompt: null,
-  prompts: {},
+  prompts: {} as Record<string, string>,
 };
 
 const MODE_OPTIONS: { value: AiMode; label: string; description: string }[] = [
@@ -53,28 +51,37 @@ const MODE_OPTIONS: { value: AiMode; label: string; description: string }[] = [
   { value: 'human_handoff', label: 'Human handoff', description: 'Queue for human follow-up (no auto replies).' },
 ];
 
+function normalizeMode(input: unknown): AiMode {
+  if (input === 'off' || input === 'auto_reply' || input === 'human_handoff') return input;
+  return 'off';
+}
+
 function isMissingColumnError(msg: string | null | undefined) {
   const m = (msg ?? '').toLowerCase();
   return m.includes('does not exist') || m.includes('unknown column');
 }
 
-async function fetchAiSettingsDefaultKey(): Promise<AiSettingsRow | null> {
-  console.log('[admin/ai] fetchAiSettingsDefaultKey');
+function boolFromPrompt(v: string | null | undefined): boolean {
+  const x = (v ?? '').trim().toLowerCase();
+  if (x === '0' || x === 'false' || x === 'off' || x === 'no') return false;
+  if (x === '1' || x === 'true' || x === 'on' || x === 'yes') return true;
+  return true;
+}
 
-  const byKeyRes = await supabase
-    .from('ai_settings')
-    .select('*')
-    .eq('key', 'default')
-    .maybeSingle();
+async function fetchAiSettingsRow(): Promise<AiSettingsRow | null> {
+  console.log('[admin/ai] fetch');
 
-  console.log('[admin/ai] select ai_settings key=default result', {
+  // 1) محاولة key=default (إذا العمود موجود)
+  const byKeyRes = await supabase.from('ai_settings').select('*').eq('key', 'default').maybeSingle();
+
+  console.log('[admin/ai] select key=default', {
     hasData: Boolean(byKeyRes.data),
     error: byKeyRes.error?.message ?? null,
   });
 
   if (byKeyRes.error && isMissingColumnError(byKeyRes.error.message)) {
-    console.log('[admin/ai] ai_settings.key missing; falling back to first row');
-
+    // 2) fallback: أول صف
+    console.log('[admin/ai] key column missing; fallback first row');
     const fallbackRes = await supabase
       .from('ai_settings')
       .select('*')
@@ -82,59 +89,30 @@ async function fetchAiSettingsDefaultKey(): Promise<AiSettingsRow | null> {
       .limit(1)
       .maybeSingle();
 
-    console.log('[admin/ai] select ai_settings fallback result', {
-      hasData: Boolean(fallbackRes.data),
-      error: fallbackRes.error?.message ?? null,
-    });
-
-    if (fallbackRes.error) {
-      throw new Error(fallbackRes.error.message);
-    }
-
-    if (!fallbackRes.data) return null;
-
-    const row = fallbackRes.data as AiSettingsRow;
-    return {
-      id: row.id,
-      key: row.key ?? null,
-      is_enabled: Boolean(row.is_enabled),
-      mode: (row.mode ?? 'off') as AiMode,
-      public_chat_enabled: Boolean(row.public_chat_enabled),
-      private_chat_enabled: Boolean(row.private_chat_enabled),
-      system_prompt: row.system_prompt ?? null,
-      updated_at: row.updated_at ?? null,
-    };
+    if (fallbackRes.error) throw new Error(fallbackRes.error.message);
+    return (fallbackRes.data as AiSettingsRow) ?? null;
   }
 
-  if (byKeyRes.error) {
-    throw new Error(byKeyRes.error.message);
-  }
-
-  if (!byKeyRes.data) return null;
-
-  const row = byKeyRes.data as AiSettingsRow;
-  return {
-    id: row.id,
-    key: row.key ?? 'default',
-    is_enabled: Boolean(row.is_enabled),
-    mode: (row.mode ?? 'off') as AiMode,
-    public_chat_enabled: Boolean(row.public_chat_enabled),
-    private_chat_enabled: Boolean(row.private_chat_enabled),
-    system_prompt: row.system_prompt ?? null,
-    updated_at: row.updated_at ?? null,
-  };
+  if (byKeyRes.error) throw new Error(byKeyRes.error.message);
+  return (byKeyRes.data as AiSettingsRow) ?? null;
 }
 
 export default function AdminAiSettingsPage() {
-  const mountedRef = useRef<boolean>(true);
+  const mountedRef = useRef(true);
 
   const [ui, setUi] = useState<UiState>({ status: 'loading' });
 
-  const [isEnabled, setIsEnabled] = useState<boolean>(DEFAULT_SETTINGS.is_enabled);
-  const [mode, setMode] = useState<AiMode>(DEFAULT_SETTINGS.mode);
-  const [publicChatEnabled, setPublicChatEnabled] = useState<boolean>(DEFAULT_SETTINGS.public_chat_enabled);
-  const [privateChatEnabled, setPrivateChatEnabled] = useState<boolean>(DEFAULT_SETTINGS.private_chat_enabled);
-  const [systemPrompt, setSystemPrompt] = useState<string>(DEFAULT_SETTINGS.system_prompt ?? '');
+  const [isEnabled, setIsEnabled] = useState<boolean>(DEFAULTS.is_enabled);
+  const [mode, setMode] = useState<AiMode>(DEFAULTS.mode);
+  const [publicChatEnabled, setPublicChatEnabled] = useState<boolean>(DEFAULTS.public_chat_enabled);
+  const [privateChatEnabled, setPrivateChatEnabled] = useState<boolean>(DEFAULTS.private_chat_enabled);
+
+  // ✅ 3 لغات
+  const [promptEn, setPromptEn] = useState<string>('');
+  const [promptAr, setPromptAr] = useState<string>('');
+  const [promptDe, setPromptDe] = useState<string>('');
+
+  // realtime ضمن prompts (كما عندك)
   const [realtimeEnabled, setRealtimeEnabled] = useState<boolean>(true);
 
   const isBusy = ui.status === 'loading' || ui.status === 'saving';
@@ -143,28 +121,36 @@ export default function AdminAiSettingsPage() {
     setUi({ status: 'loading' });
 
     try {
-      const s = await fetchAiSettingsDefaultKey();
+      const row = await fetchAiSettingsRow();
       if (!mountedRef.current) return;
 
-      if (!s) {
-        console.log('[admin/ai] no ai_settings row for key=default; using local defaults');
-        setIsEnabled(DEFAULT_SETTINGS.is_enabled);
-        setMode(DEFAULT_SETTINGS.mode);
-        setPublicChatEnabled(DEFAULT_SETTINGS.public_chat_enabled);
-        setPrivateChatEnabled(DEFAULT_SETTINGS.private_chat_enabled);
-        setSystemPrompt(DEFAULT_SETTINGS.system_prompt ?? '');
+      if (!row) {
+        setIsEnabled(DEFAULTS.is_enabled);
+        setMode(DEFAULTS.mode);
+        setPublicChatEnabled(DEFAULTS.public_chat_enabled);
+        setPrivateChatEnabled(DEFAULTS.private_chat_enabled);
+        setPromptEn('');
+        setPromptAr('');
+        setPromptDe('');
         setRealtimeEnabled(true);
         setUi({ status: 'ready' });
         return;
       }
 
-      setIsEnabled(s.is_enabled);
-      setMode(s.mode);
-      setPublicChatEnabled(s.public_chat_enabled);
-      setPrivateChatEnabled(s.private_chat_enabled);
-      setSystemPrompt(s.system_prompt ?? '');
-      const promptVal = s.prompts?.__realtime_enabled ?? null;
-      setRealtimeEnabled(!(promptVal === '0' || promptVal === 'false' || promptVal === 'off'));
+      const prompts = (row.prompts ?? {}) as Record<string, string>;
+
+      // ✅ نقرأ من prompts أولاً، وإذا مش موجودة نعمل fallback على system_prompt للإنجليزي
+      setPromptEn((prompts.en ?? row.system_prompt ?? '').toString());
+      setPromptAr((prompts.ar ?? '').toString());
+      setPromptDe((prompts.de ?? '').toString());
+
+      setIsEnabled(Boolean(row.is_enabled));
+      setMode(normalizeMode(row.mode));
+      setPublicChatEnabled(Boolean(row.public_chat_enabled));
+      setPrivateChatEnabled(Boolean(row.private_chat_enabled));
+
+      setRealtimeEnabled(boolFromPrompt(prompts.__realtime_enabled));
+
       setUi({ status: 'ready' });
     } catch (e) {
       console.error('[admin/ai] load failed', e);
@@ -185,45 +171,79 @@ export default function AdminAiSettingsPage() {
     setUi({ status: 'saving' });
 
     try {
+      // ✅ نخزن اللغات داخل prompts
+      const promptsPayload: Record<string, string> = {
+        en: promptEn.trim(),
+        ar: promptAr.trim(),
+        de: promptDe.trim(),
+        __realtime_enabled: realtimeEnabled ? '1' : '0',
+      };
+
+      // ✅ نخلي system_prompt = EN كـ fallback (لأن عمود system_prompt موجود)
       const payload: Omit<AiSettingsRow, 'id'> = {
-        key: 'default',
+        key: 'default', // إذا عمود key غير موجود رح يعطي خطأ → لكن upsert below يحاول onConflict key
         is_enabled: isEnabled,
         mode,
         public_chat_enabled: publicChatEnabled,
         private_chat_enabled: privateChatEnabled,
-        system_prompt: systemPrompt.trim().length > 0 ? systemPrompt : null,
-        prompts: {
-          __realtime_enabled: realtimeEnabled ? '1' : '0',
-        },
+        system_prompt: promptsPayload.en.length ? promptsPayload.en : null,
+        prompts: promptsPayload,
         updated_at: new Date().toISOString(),
       };
 
       console.log('[admin/ai] upserting ai_settings', {
-        key: payload.key,
         is_enabled: payload.is_enabled,
         mode: payload.mode,
         public_chat_enabled: payload.public_chat_enabled,
         private_chat_enabled: payload.private_chat_enabled,
-        system_prompt_len: (payload.system_prompt ?? '').length,
-        updated_at: payload.updated_at,
+        promptsKeys: Object.keys(promptsPayload),
       });
 
-      const res = await supabase
-        .from('ai_settings')
-        .upsert(payload, { onConflict: 'key' })
-        .select('*')
-        .maybeSingle();
+      // ✅ إذا key column غير موجود، هذا الـ upsert سيفشل.
+      // لذلك: نجرب upsert على key، وإذا فشل بسبب العمود نجرب update/insert بدون key
+      let res = await supabase.from('ai_settings').upsert(payload, { onConflict: 'key' }).select('*').maybeSingle();
 
-      console.log('[admin/ai] upsert result', {
-        ok: Boolean(res.data) && !res.error,
-        error: res.error?.message ?? null,
-      });
+      if (res.error && isMissingColumnError(res.error.message)) {
+        console.log('[admin/ai] key missing on upsert; fallback to update/insert without key');
+
+        // نحاول نجيب أول row ونحدثه، وإذا ما فيه ننشئ row جديدة (بدون key)
+        const existing = await fetchAiSettingsRow();
+        if (existing?.id) {
+          res = await supabase
+            .from('ai_settings')
+            .update({
+              is_enabled: payload.is_enabled,
+              mode: payload.mode,
+              public_chat_enabled: payload.public_chat_enabled,
+              private_chat_enabled: payload.private_chat_enabled,
+              system_prompt: payload.system_prompt,
+              prompts: payload.prompts,
+              updated_at: payload.updated_at,
+            })
+            .eq('id', existing.id)
+            .select('*')
+            .maybeSingle();
+        } else {
+          res = await supabase
+            .from('ai_settings')
+            .insert({
+              is_enabled: payload.is_enabled,
+              mode: payload.mode,
+              public_chat_enabled: payload.public_chat_enabled,
+              private_chat_enabled: payload.private_chat_enabled,
+              system_prompt: payload.system_prompt,
+              prompts: payload.prompts,
+              updated_at: payload.updated_at,
+            })
+            .select('*')
+            .maybeSingle();
+        }
+      }
 
       if (res.error) {
         setUi({ status: 'error', message: res.error.message });
         return;
       }
-
 
       setUi({ status: 'ready' });
       Alert.alert('Saved', 'AI settings updated successfully.');
@@ -231,7 +251,7 @@ export default function AdminAiSettingsPage() {
       console.error('[admin/ai] save failed', e);
       setUi({ status: 'error', message: 'Failed to save. Please try again.' });
     }
-  }, [isEnabled, mode, privateChatEnabled, publicChatEnabled, realtimeEnabled, systemPrompt]);
+  }, [isEnabled, mode, privateChatEnabled, publicChatEnabled, promptAr, promptDe, promptEn, realtimeEnabled]);
 
   const modeCards = useMemo(() => {
     return MODE_OPTIONS.map((opt) => {
@@ -262,7 +282,7 @@ export default function AdminAiSettingsPage() {
     return (
       <View style={styles.stateWrap} testID="adminAi.loading">
         <Stack.Screen options={{ title: 'AI Settings' }} />
-        <ActivityIndicator color={colors.tint} />
+        <ActivityIndicator color={Colors.tint} />
         <Text style={styles.stateTitle}>Loading AI settings…</Text>
       </View>
     );
@@ -307,8 +327,8 @@ export default function AdminAiSettingsPage() {
               testID="adminAi.isEnabled"
               value={isEnabled}
               onValueChange={setIsEnabled}
-              thumbColor={Platform.OS === 'android' ? colors.background : undefined}
-              trackColor={{ false: colors.border, true: colors.tint }}
+              thumbColor={Platform.OS === 'android' ? Colors.background : undefined}
+              trackColor={{ false: Colors.border, true: Colors.tint }}
               disabled={isBusy}
             />
           </View>
@@ -336,8 +356,8 @@ export default function AdminAiSettingsPage() {
               testID="adminAi.realtimeEnabled"
               value={realtimeEnabled}
               onValueChange={setRealtimeEnabled}
-              thumbColor={Platform.OS === 'android' ? colors.background : undefined}
-              trackColor={{ false: colors.border, true: colors.tint }}
+              thumbColor={Platform.OS === 'android' ? Colors.background : undefined}
+              trackColor={{ false: Colors.border, true: Colors.tint }}
               disabled={isBusy}
             />
           </View>
@@ -358,8 +378,8 @@ export default function AdminAiSettingsPage() {
               testID="adminAi.publicChatEnabled"
               value={publicChatEnabled}
               onValueChange={setPublicChatEnabled}
-              thumbColor={Platform.OS === 'android' ? colors.background : undefined}
-              trackColor={{ false: colors.border, true: colors.tint }}
+              thumbColor={Platform.OS === 'android' ? Colors.background : undefined}
+              trackColor={{ false: Colors.border, true: Colors.tint }}
               disabled={isBusy}
             />
           </View>
@@ -375,25 +395,57 @@ export default function AdminAiSettingsPage() {
               testID="adminAi.privateChatEnabled"
               value={privateChatEnabled}
               onValueChange={setPrivateChatEnabled}
-              thumbColor={Platform.OS === 'android' ? colors.background : undefined}
-              trackColor={{ false: colors.border, true: colors.tint }}
+              thumbColor={Platform.OS === 'android' ? Colors.background : undefined}
+              trackColor={{ false: Colors.border, true: Colors.tint }}
               disabled={isBusy}
             />
           </View>
         </View>
 
+        {/* ✅ 3 TextInputs */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>System prompt</Text>
-          <Text style={styles.sectionSubtitle}>A short guide for the assistant’s tone and behavior</Text>
+          <Text style={styles.sectionTitle}>System prompt (per language)</Text>
+          <Text style={styles.sectionSubtitle}>Saved into prompts.en / prompts.ar / prompts.de</Text>
         </View>
 
         <View style={styles.card}>
+          <Text style={styles.langLabel}>English (EN)</Text>
           <TextInput
-            testID="adminAi.systemPrompt"
-            value={systemPrompt}
-            onChangeText={setSystemPrompt}
-            placeholder="e.g. Be concise, polite, and ask clarifying questions before booking."
-            placeholderTextColor={colors.textSecondary}
+            testID="adminAi.promptEn"
+            value={promptEn}
+            onChangeText={setPromptEn}
+            placeholder="e.g. Be concise, helpful, and confirm booking details."
+            placeholderTextColor={Colors.textSecondary}
+            style={styles.textArea}
+            multiline
+            textAlignVertical="top"
+            editable={!isBusy}
+          />
+
+          <View style={{ height: 12 }} />
+
+          <Text style={styles.langLabel}>Arabic (AR)</Text>
+          <TextInput
+            testID="adminAi.promptAr"
+            value={promptAr}
+            onChangeText={setPromptAr}
+            placeholder="مثال: كن مختصرًا ومفيدًا وتأكد من تفاصيل الحجز قبل المتابعة."
+            placeholderTextColor={Colors.textSecondary}
+            style={[styles.textArea, styles.textAreaAr]}
+            multiline
+            textAlignVertical="top"
+            editable={!isBusy}
+          />
+
+          <View style={{ height: 12 }} />
+
+          <Text style={styles.langLabel}>German (DE)</Text>
+          <TextInput
+            testID="adminAi.promptDe"
+            value={promptDe}
+            onChangeText={setPromptDe}
+            placeholder="z.B. Sei kurz, hilfreich und bestätige die Buchungsdetails."
+            placeholderTextColor={Colors.textSecondary}
             style={styles.textArea}
             multiline
             textAlignVertical="top"
@@ -407,7 +459,7 @@ export default function AdminAiSettingsPage() {
           onPress={onSave}
           style={({ pressed }) => [styles.saveBtn, pressed && !isBusy ? { opacity: 0.9 } : null]}
         >
-          {ui.status === 'saving' ? <ActivityIndicator color={colors.background} /> : null}
+          {ui.status === 'saving' ? <ActivityIndicator color={Colors.background} /> : null}
           <Text style={styles.saveText}>{ui.status === 'saving' ? 'Saving…' : 'Save changes'}</Text>
         </Pressable>
 
@@ -422,157 +474,99 @@ export default function AdminAiSettingsPage() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 24,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  content: { padding: 16, paddingBottom: 24 },
+
   hero: {
     padding: 16,
     borderRadius: 16,
-    backgroundColor: colors.card,
+    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: Colors.border,
   },
-  heroTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  heroSubtitle: {
-    marginTop: 8,
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18,
-  },
-  sectionHeader: {
-    marginTop: 18,
-    marginBottom: 10,
-    paddingHorizontal: 2,
-  },
+  heroTitle: { color: Colors.text, fontSize: 18, fontWeight: '900' },
+  heroSubtitle: { marginTop: 8, color: Colors.textSecondary, fontSize: 13, fontWeight: '700', lineHeight: 18 },
+
+  sectionHeader: { marginTop: 18, marginBottom: 10, paddingHorizontal: 2 },
   sectionTitle: {
-    color: colors.text,
+    color: Colors.text,
     fontSize: 14,
     fontWeight: '900',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
-  sectionSubtitle: {
-    marginTop: 6,
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
-  },
+  sectionSubtitle: { marginTop: 6, color: Colors.textSecondary, fontSize: 12, fontWeight: '700', lineHeight: 16 },
+
   card: {
-    backgroundColor: colors.card,
+    backgroundColor: Colors.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: Colors.border,
     padding: 14,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  rowText: {
-    flex: 1,
-  },
-  label: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  help: {
-    marginTop: 6,
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginVertical: 12,
-  },
-  modeGrid: {
-    gap: 10,
-  },
+
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  rowText: { flex: 1 },
+  label: { color: Colors.text, fontSize: 14, fontWeight: '900' },
+  help: { marginTop: 6, color: Colors.textSecondary, fontSize: 12, fontWeight: '700', lineHeight: 16 },
+
+  divider: { height: 1, backgroundColor: Colors.border, marginVertical: 12 },
+
+  modeGrid: { gap: 10 },
   modeCard: {
     padding: 14,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.card,
+    borderColor: Colors.border,
+    backgroundColor: Colors.card,
   },
-  modeCardSelected: {
-    borderColor: colors.tint,
-    backgroundColor: '#D4AF3715',
-  },
-  modeCardTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  radio: {
-    width: 16,
-    height: 16,
-    borderRadius: 999,
-    borderWidth: 2,
-    borderColor: colors.textSecondary,
-  },
-  radioSelected: {
-    borderColor: colors.tint,
-    backgroundColor: colors.tint,
-  },
-  modeTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  modeTitleSelected: {
-    color: colors.tint,
-  },
-  modeDesc: {
-    marginTop: 8,
-    color: colors.textSecondary,
+  modeCardSelected: { borderColor: Colors.tint, backgroundColor: '#D4AF3715' },
+  modeCardTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  radio: { width: 16, height: 16, borderRadius: 999, borderWidth: 2, borderColor: Colors.textSecondary },
+  radioSelected: { borderColor: Colors.tint, backgroundColor: Colors.tint },
+  modeTitle: { color: Colors.text, fontSize: 15, fontWeight: '900' },
+  modeTitleSelected: { color: Colors.tint },
+  modeDesc: { marginTop: 8, color: Colors.textSecondary, fontSize: 12, fontWeight: '700', lineHeight: 16 },
+
+  langLabel: {
+    color: Colors.text,
     fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
+    fontWeight: '900',
+    marginBottom: 8,
   },
+
   textArea: {
-    minHeight: 140,
+    minHeight: 120,
     maxHeight: 320,
-    color: colors.text,
+    color: Colors.text,
     fontSize: 13,
     fontWeight: '700',
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.background,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
   },
+
+  // ✅ RTL كامل للعربي
+  textAreaAr: {
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    ...(Platform.OS === 'web' ? ({ direction: 'rtl' } as any) : null),
+  },
+
   saveBtn: {
     marginTop: 16,
     height: 48,
     borderRadius: 14,
-    backgroundColor: colors.tint,
+    backgroundColor: Colors.tint,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 10,
   },
-  saveText: {
-    color: colors.background,
-    fontSize: 14,
-    fontWeight: '900',
-  },
+  saveText: { color: Colors.background, fontSize: 14, fontWeight: '900' },
+
   secondaryBtn: {
     marginTop: 10,
     height: 44,
@@ -580,46 +574,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: Colors.border,
   },
-  secondaryText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '900',
-  },
+  secondaryText: { color: Colors.text, fontSize: 13, fontWeight: '900' },
+
   stateWrap: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: Colors.background,
     padding: 24,
     gap: 12,
   },
-  stateTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  stateText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-    lineHeight: 18,
-  },
+  stateTitle: { color: Colors.text, fontSize: 15, fontWeight: '900', textAlign: 'center' },
+  stateText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '700', textAlign: 'center', lineHeight: 18 },
   retryBtn: {
     marginTop: 8,
     paddingHorizontal: 16,
     height: 40,
     borderRadius: 999,
-    backgroundColor: colors.tint,
+    backgroundColor: Colors.tint,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  retryText: {
-    color: colors.background,
-    fontSize: 14,
-    fontWeight: '900',
-  },
+  retryText: { color: Colors.background, fontSize: 14, fontWeight: '900' },
 });

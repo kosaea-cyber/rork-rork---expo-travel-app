@@ -8,6 +8,7 @@ import { useBookingStore } from '@/store/bookingStore';
 import { supabase } from '@/lib/supabase/client';
 import { useProfileStore, type PreferredLanguage } from '@/store/profileStore';
 import { useAuthStore } from '@/store/authStore';
+import DateRangeSelect from '@/components/DateRangeSelect';
 
 type PackageRow = {
   id: string;
@@ -36,6 +37,10 @@ function getLocalizedText(row: PackageRow, key: 'title' | 'description', lang: P
   return (v ?? fallback ?? '').trim();
 }
 
+function isIsoDate(v: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
 export default function BookingRequestScreen() {
   const { packageId } = useLocalSearchParams<{ packageId?: string }>();
   const router = useRouter();
@@ -45,25 +50,22 @@ export default function BookingRequestScreen() {
   const preferredLanguage = useProfileStore((s) => s.preferredLanguage);
   const language = (preferredLanguage ?? fallbackLanguage ?? 'en') as PreferredLanguage;
 
+  const profileFullName = useProfileStore((s) => (s as any).fullName ?? null);
+  const profilePhone = useProfileStore((s) => (s as any).phone ?? null);
+
   const createBooking = useBookingStore((state) => state.createBooking);
   const isLoading = useBookingStore((state) => state.isLoading);
   const user = useAuthStore((state) => state.user);
 
-  const [startDate, setStartDate] = useState<string>('');
+  const [startIso, setStartIso] = useState<string | null>(null);
+  const [endIso, setEndIso] = useState<string | null>(null);
   const [travelers, setTravelers] = useState<string>('1');
   const [notes, setNotes] = useState<string>('');
 
-  const {
-    data: pkg,
-    isLoading: pkgLoading,
-    isError,
-    error,
-    refetch,
-  } = useQuery({
+  const { data: pkg, isLoading: pkgLoading, isError, error, refetch } = useQuery({
     queryKey: ['package', { id: packageId ?? null }],
     enabled: Boolean(packageId),
     queryFn: async (): Promise<PackageRow> => {
-      console.log('[book] fetching package', { packageId });
       const { data, error } = await supabase
         .from('packages')
         .select(
@@ -72,13 +74,8 @@ export default function BookingRequestScreen() {
         .eq('id', packageId as string)
         .maybeSingle();
 
-      if (error) {
-        console.log('[book] package fetch error', error);
-        throw new Error(error.message);
-      }
+      if (error) throw new Error(error.message);
       if (!data) throw new Error('Package not found');
-
-      console.log('[book] package fetched', { id: data.id });
       return data as PackageRow;
     },
   });
@@ -88,19 +85,45 @@ export default function BookingRequestScreen() {
     return getLocalizedText(pkg, 'title', language);
   }, [language, pkg]);
 
+  const isValid = useMemo(() => {
+    if (!pkg || !user) return false;
+    if (!startIso || !endIso) return false;
+    if (!isIsoDate(startIso) || !isIsoDate(endIso)) return false;
+    if (endIso < startIso) return false;
+
+    const tr = parseInt(travelers, 10);
+    if (!Number.isFinite(tr) || tr < 1 || tr > 20) return false;
+
+    return true;
+  }, [endIso, pkg, startIso, travelers, user]);
+
   const handleRequest = useCallback(async () => {
-    if (!startDate || !pkg || !user) return;
+    if (!pkg || !user || !startIso || !endIso) return;
 
-    const finalNotes = [
-      `Package: ${pkgTitle} (${pkg.id})`,
-      `Preferred start date: ${startDate}`,
-      `Travelers: ${parseInt(travelers, 10) || 1}`,
-      notes?.trim() ? `Notes: ${notes.trim()}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    // ✅ require profile info before booking
+    if (!profileFullName?.trim() || !profilePhone?.trim()) {
+      Alert.alert(
+        t('completeProfile') ?? 'Complete your profile',
+        t('needNamePhoneToBook') ?? 'Please enter your full name and phone number before booking.',
+        [{ text: 'OK', onPress: () => router.push('/account') }],
+      );
+      return;
+    }
 
-    const created = await createBooking({ notes: finalNotes });
+    if (endIso < startIso) {
+      Alert.alert(t('somethingWentWrong') ?? 'Invalid dates', t('retry') ?? 'Please try again');
+      return;
+    }
+
+    const tr = parseInt(travelers, 10) || 1;
+
+    const created = await createBooking({
+      packageId: pkg.id,
+      preferredStartDate: startIso,
+      preferredEndDate: endIso,
+      travelers: tr,
+      customerNotes: notes?.trim() ? notes.trim() : null,
+    });
 
     if (!created) {
       Alert.alert(t('somethingWentWrong') ?? 'Something went wrong', t('retry') ?? 'Please try again');
@@ -110,7 +133,7 @@ export default function BookingRequestScreen() {
     Alert.alert('Success', t('bookingRequestSent') ?? 'Booking request sent', [
       { text: 'OK', onPress: () => router.navigate('/(tabs)/bookings') },
     ]);
-  }, [createBooking, notes, pkg, pkgTitle, router, startDate, t, travelers, user]);
+  }, [createBooking, endIso, notes, pkg, profileFullName, profilePhone, router, startIso, t, travelers, user]);
 
   if (!packageId) {
     return (
@@ -161,17 +184,14 @@ export default function BookingRequestScreen() {
       </Text>
 
       <View style={styles.form}>
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>{t('preferredStartDate') ?? 'Preferred Start Date (YYYY-MM-DD)'}</Text>
-          <TextInput
-            testID="book-start-date"
-            style={styles.input}
-            value={startDate}
-            onChangeText={setStartDate}
-            placeholder="2025-12-01"
-            placeholderTextColor={Colors.textSecondary}
-          />
-        </View>
+        <DateRangeSelect
+          labelFrom={t('preferredStartDate') ?? 'Preferred start date'}
+          labelTo={t('preferredEndDate') ?? 'Preferred end date'}
+          valueFrom={startIso}
+          valueTo={endIso}
+          onChangeFrom={setStartIso}
+          onChangeTo={setEndIso}
+        />
 
         <View style={styles.inputContainer}>
           <Text style={styles.label}>{t('numberOfTravelers') ?? 'Number of Travelers'}</Text>
@@ -183,6 +203,7 @@ export default function BookingRequestScreen() {
             keyboardType="number-pad"
             placeholderTextColor={Colors.textSecondary}
           />
+          <Text style={styles.hint}>{t('travelersHint') ?? '1 - 20'}</Text>
         </View>
 
         <View style={styles.inputContainer}>
@@ -198,107 +219,50 @@ export default function BookingRequestScreen() {
           />
         </View>
 
-        <TouchableOpacity testID="book-submit" style={styles.button} onPress={handleRequest} disabled={isLoading || !startDate}>
-          <Text style={styles.buttonText}>{isLoading ? t('loading') ?? 'Loading…' : t('submit') ?? 'Submit'}</Text>
+        <TouchableOpacity
+          testID="book-submit"
+          style={[styles.button, { opacity: isLoading || !isValid ? 0.6 : 1 }]}
+          onPress={handleRequest}
+          disabled={isLoading || !isValid}
+        >
+          <Text style={styles.buttonText}>
+            {isLoading ? t('loading') ?? 'Loading…' : t('submit') ?? 'Submit'}
+          </Text>
         </TouchableOpacity>
+
+        {!isValid ? (
+          <Text style={styles.validationText}>
+            {t('bookingValidationHint') ?? 'Please select a valid date range and number of travelers.'}
+          </Text>
+        ) : null}
+
+        {user && (!profileFullName?.trim() || !profilePhone?.trim()) ? (
+          <Text style={styles.validationText}>
+            {t('needNamePhoneToBook') ?? 'Please enter your full name and phone number in Account before booking.'}
+          </Text>
+        ) : null}
       </View>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  stateCenter: {
-    flex: 1,
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  stateTitle: {
-    color: Colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  stateSubtitle: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
-  retryButton: {
-    marginTop: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  retryButtonText: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  content: {
-    padding: 24,
-  },
-  subtitle: {
-    color: Colors.textSecondary,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  pkgTitle: {
-    color: Colors.text,
-    fontSize: 24,
-    fontWeight: '900',
-    letterSpacing: -0.3,
-    marginBottom: 32,
-    marginTop: 6,
-  },
-  form: {
-    gap: 24,
-  },
-  inputContainer: {
-    gap: 8,
-  },
-  label: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  input: {
-    backgroundColor: Colors.card,
-    height: 50,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    color: Colors.text,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    fontWeight: '600',
-  },
-  textArea: {
-    height: 120,
-    paddingTop: 16,
-    textAlignVertical: 'top',
-  },
-  button: {
-    backgroundColor: Colors.tint,
-    height: 56,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 16,
-    opacity: 1,
-  },
-  buttonText: {
-    color: Colors.background,
-    fontSize: 14,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  stateCenter: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  stateTitle: { color: Colors.text, fontSize: 16, fontWeight: '700' },
+  stateSubtitle: { color: Colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  retryButton: { marginTop: 10, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border },
+  retryButtonText: { color: Colors.text, fontSize: 14, fontWeight: '700' },
+  content: { padding: 24 },
+  subtitle: { color: Colors.textSecondary, fontSize: 16, fontWeight: '700' },
+  pkgTitle: { color: Colors.text, fontSize: 24, fontWeight: '900', letterSpacing: -0.3, marginBottom: 20, marginTop: 6 },
+  form: { gap: 24 },
+  inputContainer: { gap: 8 },
+  label: { color: Colors.text, fontSize: 14, fontWeight: '700' },
+  hint: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  input: { backgroundColor: Colors.card, height: 50, borderRadius: 12, paddingHorizontal: 16, color: Colors.text, borderWidth: 1, borderColor: Colors.border, fontWeight: '600' },
+  textArea: { height: 120, paddingTop: 16, textAlignVertical: 'top' },
+  button: { backgroundColor: Colors.tint, height: 56, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginTop: 6 },
+  buttonText: { color: Colors.background, fontSize: 14, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.6 },
+  validationText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700', textAlign: 'center' },
 });

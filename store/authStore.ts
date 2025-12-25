@@ -10,7 +10,7 @@ interface AuthState {
   isLoading: boolean;
   isGuest: boolean;
   isAdmin: boolean;
-  
+
   login: (email: string, password?: string) => Promise<boolean>;
   register: (user: Omit<User, 'id' | 'role' | 'createdAt' | 'status'>, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -73,7 +73,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         console.error(
           '[authStore] profiles select error',
           details,
-          typeof details === 'object' ? JSON.stringify(details) : String(details)
+          typeof details === 'object' ? JSON.stringify(details) : String(details),
         );
 
         const status = (details.status as number | null) ?? null;
@@ -132,6 +132,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       };
 
       const isAdmin = jwtRole === 'admin' || role === 'admin';
+
+      // ✅ store profile basics in zustand profileStore
+      try {
+        useProfileStore.getState().setProfile({
+          role,
+          preferredLanguage,
+          fullName: profileRes.data?.full_name ?? null,
+          phone: profileRes.data?.phone ?? null,
+        });
+      } catch (e) {
+        console.error('[authStore] profileStore.setProfile failed (non-blocking)', e);
+      }
+
       set({ user: mappedUser, isAdmin, isGuest: false, isLoading: false });
     } catch (e) {
       console.error('[authStore] checkAuth failed', e);
@@ -202,9 +215,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.error('[logout] error', error);
-      }
+      if (error) console.error('[logout] error', error);
     } catch (e) {
       console.error('[logout] error', e);
     }
@@ -224,10 +235,45 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isGuest: true, user: null, isAdmin: false, isLoading: false });
   },
 
+  // ✅ IMPORTANT: writes to Supabase profiles (upsert) + updates stores locally
   updateProfile: async (updates) => {
     const { user } = get();
     if (!user) return;
 
-    set({ user: { ...user, ...updates } });
-  }
+    const nextName = typeof updates.name === 'string' ? updates.name.trim() : undefined;
+    const nextPhone = typeof updates.phone === 'string' ? updates.phone.trim() : undefined;
+    const nextLang = typeof updates.preferredLanguage === 'string' ? updates.preferredLanguage : undefined;
+
+    const payload: any = { id: user.id };
+    if (nextName !== undefined) payload.full_name = nextName;
+    if (nextPhone !== undefined) payload.phone = nextPhone;
+    if (nextLang !== undefined) payload.preferred_language = nextLang;
+
+    const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
+
+    if (error) {
+      console.error('[authStore] updateProfile upsert error', error.message);
+      throw new Error(error.message);
+    }
+
+    const merged: User = {
+      ...user,
+      ...(nextName !== undefined ? { name: nextName } : {}),
+      ...(nextPhone !== undefined ? { phone: nextPhone } : {}),
+      ...(nextLang !== undefined ? { preferredLanguage: nextLang as any } : {}),
+    };
+
+    set({ user: merged });
+
+    try {
+      useProfileStore.getState().setProfile({
+        role: merged.role as any,
+        preferredLanguage: merged.preferredLanguage as any,
+        fullName: merged.name ?? null,
+        phone: merged.phone ?? null,
+      });
+    } catch (e) {
+      console.error('[authStore] updateProfile setProfile failed (non-blocking)', e);
+    }
+  },
 }));

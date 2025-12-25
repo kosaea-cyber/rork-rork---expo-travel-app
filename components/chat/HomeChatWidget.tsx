@@ -12,12 +12,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { MessageCircle, Send, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import Colors from '@/constants/colors';
 import { useI18nStore } from '@/constants/i18n';
-import { resolveAutoReplyText } from '@/lib/chat/autoReplyTemplates';
-import { useAuthStore } from '@/store/authStore';
+import { supabase } from '@/lib/supabase/client';
 import type { Conversation, Message } from '@/store/chatStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -44,8 +43,6 @@ export default function HomeChatWidget() {
   const lastSendAtRef = useRef<number>(0);
   const listRef = useRef<FlatList<UiMessage> | null>(null);
 
-  const user = useAuthStore((s) => s.user);
-
   const {
     isLoading,
     error,
@@ -53,7 +50,7 @@ export default function HomeChatWidget() {
     hasMoreByConversationId,
     realtimeHealthByConversationId,
     realtimeErrorByConversationId,
-    getPublicConversation,
+    getOrCreateGuestConversation,
     fetchMessages,
     subscribeToConversation,
     sendMessage,
@@ -61,17 +58,12 @@ export default function HomeChatWidget() {
   } = useChatStore();
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
-
   const language = useI18nStore((s) => s.language);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 1600);
   }, []);
-  const publicBannerText = useMemo(() => {
-    if (!conversation || conversation.type !== 'public') return null;
-    return resolveAutoReplyText({ categoryKey: 'general', preferredLanguage: language });
-  }, [conversation, language]);
 
   const messages = useMemo<UiMessage[]>(() => {
     if (!conversation?.id) return [];
@@ -104,8 +96,21 @@ export default function HomeChatWidget() {
         useNativeDriver: true,
       }).start();
     },
-    [openAnim]
+    [openAnim],
   );
+
+  // ✅ Ensure guest has an auth session (anonymous)
+  const ensureGuestSession = useCallback(async (): Promise<boolean> => {
+    const { data } = await supabase.auth.getSession();
+    if (data.session) return true;
+
+    const { error: anonErr } = await supabase.auth.signInAnonymously();
+    if (anonErr) {
+      console.error('[HomeChatWidget] signInAnonymously failed', anonErr.message);
+      return false;
+    }
+    return true;
+  }, []);
 
   const bootstrap = useCallback(async () => {
     setLocalError(null);
@@ -114,25 +119,28 @@ export default function HomeChatWidget() {
     try {
       console.log('[HomeChatWidget] bootstrap');
 
-      const conv = await getPublicConversation();
+      const ok = await ensureGuestSession();
+      if (!ok) {
+        setLocalError('Chat is unavailable right now. Please try again.');
+        setIsBootstrapping(false);
+        return;
+      }
+
+      // ✅ get/create guest-only conversation + auto welcome
+      const conv = await getOrCreateGuestConversation(language || 'de');
       if (!conv) {
         const storeErrUnknown: unknown = useChatStore.getState().error;
         const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
-        console.error('[HomeChatWidget] no public conversation', storeErrUnknown);
-
-        setLocalError(
-          storeErr && storeErr.trim().length > 0
-            ? storeErr
-            : 'Public chat is not configured yet. Please contact support.'
-        );
-
+        setLocalError(storeErr && storeErr.trim() ? storeErr : 'Chat is temporarily unavailable. Please try again.');
         setIsBootstrapping(false);
         return;
       }
 
       setConversation(conv);
-      await fetchMessages(conv.id, 30);
+
+      await fetchMessages(conv.id, 50);
       void markConversationReadForUser(conv.id);
+
       setIsBootstrapping(false);
 
       requestAnimationFrame(() => {
@@ -142,20 +150,15 @@ export default function HomeChatWidget() {
       console.error('[HomeChatWidget] bootstrap failed', e);
       const storeErrUnknown: unknown = useChatStore.getState().error;
       const storeErr = typeof storeErrUnknown === 'string' ? storeErrUnknown : null;
-      setLocalError(
-        storeErr && storeErr.trim().length > 0
-          ? storeErr
-          : 'Chat is temporarily unavailable. Please try again.'
-      );
+      setLocalError(storeErr && storeErr.trim() ? storeErr : 'Chat is temporarily unavailable. Please try again.');
       setIsBootstrapping(false);
     }
-  }, [fetchMessages, getPublicConversation, markConversationReadForUser]);
+  }, [ensureGuestSession, fetchMessages, getOrCreateGuestConversation, language, markConversationReadForUser]);
 
   useEffect(() => {
     if (!isOpen) return;
     animateOpen(true);
     void bootstrap();
-    return;
   }, [animateOpen, bootstrap, isOpen]);
 
   useEffect(() => {
@@ -172,9 +175,7 @@ export default function HomeChatWidget() {
   }, [conversation?.id, isOpen, subscribeToConversation]);
 
   useEffect(() => {
-    if (!isOpen) {
-      animateOpen(false);
-    }
+    if (!isOpen) animateOpen(false);
   }, [animateOpen, isOpen]);
 
   useEffect(() => {
@@ -184,28 +185,19 @@ export default function HomeChatWidget() {
     });
   }, [isOpen, messages.length]);
 
-  const onOpenPress = useCallback(() => {
-    console.log('[HomeChatWidget] open press');
-    setIsOpen(true);
-  }, []);
-
+  const onOpenPress = useCallback(() => setIsOpen(true), []);
   const onClosePress = useCallback(() => {
-    console.log('[HomeChatWidget] close press');
     setIsOpen(false);
     setDraft('');
     setLocalError(null);
   }, []);
 
-  const onRetry = useCallback(() => {
-    console.log('[HomeChatWidget] retry');
-    void bootstrap();
-  }, [bootstrap]);
+  const onRetry = useCallback(() => void bootstrap(), [bootstrap]);
 
   const onRefresh = useCallback(() => {
     const convId = conversation?.id;
     if (!convId) return;
-    console.log('[HomeChatWidget] manual refresh', { convId });
-    void fetchMessages(convId, 30);
+    void fetchMessages(convId, 50);
   }, [conversation?.id, fetchMessages]);
 
   const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
@@ -218,8 +210,7 @@ export default function HomeChatWidget() {
 
     try {
       setIsLoadingOlder(true);
-      console.log('[HomeChatWidget] load older', { convId, before: oldest });
-      await fetchMessages(convId, 30, oldest);
+      await fetchMessages(convId, 50, oldest);
     } finally {
       setIsLoadingOlder(false);
     }
@@ -235,13 +226,8 @@ export default function HomeChatWidget() {
     const trimmed = draft.trim();
     if (!trimmed) return;
 
-    if (!user) {
-      showToast('Please sign in to send messages.');
-      return;
-    }
-
     const now = Date.now();
-    if (now - lastSendAtRef.current < 3000) {
+    if (now - lastSendAtRef.current < 1200) {
       showToast('Please wait a moment');
       return;
     }
@@ -250,13 +236,13 @@ export default function HomeChatWidget() {
     setDraft('');
     setLocalError(null);
 
-    const sent = await sendMessage(convId, trimmed, 'public_auth');
+    const sent = await sendMessage(convId, trimmed);
     if (!sent) {
       setLocalError('Failed to send message. Please try again.');
       setDraft(trimmed);
       return;
     }
-  }, [conversation?.id, draft, sendMessage, showToast, user]);
+  }, [conversation?.id, draft, sendMessage, showToast]);
 
   const effectiveError = localError ?? error;
   const showLoading = isBootstrapping || isLoading;
@@ -267,9 +253,7 @@ export default function HomeChatWidget() {
     return (
       <View style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowTheirs]}>
         <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-          <Text style={[styles.messageText, mine ? styles.messageTextMine : styles.messageTextTheirs]}>
-            {item.body}
-          </Text>
+          <Text style={styles.messageText}>{item.body}</Text>
           <Text style={[styles.messageMeta, mine ? styles.messageMetaMine : styles.messageMetaTheirs]}>
             {formatTime(item.createdAt)}
           </Text>
@@ -295,20 +279,13 @@ export default function HomeChatWidget() {
         testID="homeChatWidgetOpenButton"
       >
         <View style={styles.fabInner}>
-          <MessageCircle color={Colors.text} size={22} />
+          <Ionicons name="chatbubble-ellipses-outline" color={Colors.text} size={22} />
         </View>
       </Pressable>
 
-      <Modal
-        visible={isOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={onClosePress}
-        statusBarTranslucent
-        testID="homeChatWidgetModal"
-      >
-        <View style={styles.overlay} testID="homeChatWidgetOverlay">
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClosePress} testID="homeChatWidgetBackdrop" />
+      <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onClosePress} statusBarTranslucent>
+        <View style={styles.overlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClosePress} />
 
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -323,23 +300,14 @@ export default function HomeChatWidget() {
                   opacity: openAnim,
                 },
               ]}
-              testID="homeChatWidgetSheet"
             >
               <View style={styles.sheetHeader}>
                 <View style={styles.headerLeft}>
-                  <Text style={styles.sheetTitle} testID="homeChatWidgetTitle">
-                    Chat
-                  </Text>
-                  <Text style={styles.sheetSubtitle} testID="homeChatWidgetGuestLabel">
-                    {user ? 'Signed in' : 'Guest (sign in required to send)'}
-                  </Text>
+                  <Text style={styles.sheetTitle}>Chat</Text>
+                  <Text style={styles.sheetSubtitle}>Guest chat (private per device/session)</Text>
 
                   {realtimeHealth === 'error' ? (
-                    <Pressable
-                      onPress={onRefresh}
-                      style={({ pressed }) => [styles.realtimeBanner, pressed && styles.realtimeBannerPressed]}
-                      testID="homeChatWidgetRealtimeFallback"
-                    >
+                    <Pressable onPress={onRefresh} style={styles.realtimeBanner}>
                       <Text style={styles.realtimeBannerText}>
                         Realtime unavailable{realtimeError ? `: ${realtimeError}` : ''}. Tap to refresh.
                       </Text>
@@ -347,38 +315,24 @@ export default function HomeChatWidget() {
                   ) : null}
                 </View>
 
-                <Pressable
-                  onPress={onClosePress}
-                  style={({ pressed }) => [styles.closeButton, pressed && styles.closeButtonPressed]}
-                  accessibilityRole="button"
-                  testID="homeChatWidgetCloseButton"
-                >
-                  <X color={Colors.textSecondary} size={18} />
+                <Pressable onPress={onClosePress} style={styles.closeButton} accessibilityRole="button">
+                  <Ionicons name="close" color={Colors.textSecondary} size={18} />
                 </Pressable>
               </View>
 
               {effectiveError ? (
-                <View style={styles.errorBox} testID="homeChatWidgetError">
+                <View style={styles.errorBox}>
                   <Text style={styles.errorTitle}>Something went wrong</Text>
                   <Text style={styles.errorText}>{effectiveError}</Text>
-                  <Pressable
-                    onPress={onRetry}
-                    style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}
-                    testID="homeChatWidgetRetryButton"
-                  >
+                  <Pressable onPress={onRetry} style={styles.retryButton}>
                     <Text style={styles.retryText}>Retry</Text>
                   </Pressable>
                 </View>
               ) : null}
 
               <View style={styles.messagesWrap}>
-                {publicBannerText ? (
-                  <View style={styles.systemBanner} testID="homeChatWidget.publicBanner">
-                    <Text style={styles.systemBannerText}>{publicBannerText}</Text>
-                  </View>
-                ) : null}
                 {showLoading && messages.length === 0 ? (
-                  <View style={styles.loading} testID="homeChatWidgetLoading">
+                  <View style={styles.loading}>
                     <ActivityIndicator color={Colors.primary} />
                     <Text style={styles.loadingText}>Connecting…</Text>
                   </View>
@@ -391,7 +345,6 @@ export default function HomeChatWidget() {
                     renderItem={renderItem}
                     keyExtractor={keyExtractor}
                     contentContainerStyle={styles.listContent}
-                    testID="homeChatWidgetMessagesList"
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                     ListHeaderComponent={
@@ -399,12 +352,7 @@ export default function HomeChatWidget() {
                         <Pressable
                           onPress={onLoadOlder}
                           disabled={isLoadingOlder}
-                          style={({ pressed }) => [
-                            styles.loadOlder,
-                            (pressed && !isLoadingOlder) ? { opacity: 0.92 } : null,
-                            isLoadingOlder ? { opacity: 0.6 } : null,
-                          ]}
-                          testID="homeChatWidgetLoadOlder"
+                          style={[styles.loadOlder, isLoadingOlder ? { opacity: 0.6 } : null]}
                         >
                           <Text style={styles.loadOlderText}>{isLoadingOlder ? 'Loading…' : 'Load older'}</Text>
                         </Pressable>
@@ -414,36 +362,33 @@ export default function HomeChatWidget() {
                 )}
               </View>
 
-              <View style={styles.composer} testID="homeChatWidgetComposer">
+              <View style={styles.composer}>
                 <View style={styles.inputWrap}>
                   <TextInput
                     value={draft}
                     onChangeText={setDraft}
-                    editable={Boolean(user)}
-                    placeholder={user ? 'Write a message…' : 'Sign in to message'}
+                    placeholder="Write a message…"
                     placeholderTextColor={Colors.textSecondary}
                     style={styles.input}
                     multiline
-                    testID="homeChatWidgetInput"
                   />
                 </View>
 
                 <Pressable
                   onPress={onSend}
-                  disabled={!draft.trim() || !conversation?.id || !user}
+                  disabled={!draft.trim() || !conversation?.id}
                   style={({ pressed }) => [
                     styles.sendButton,
                     (!draft.trim() || !conversation?.id) && styles.sendButtonDisabled,
                     pressed && styles.sendButtonPressed,
                   ]}
-                  testID="homeChatWidgetSendButton"
                 >
-                  <Send color={Colors.text} size={18} />
+                  <Ionicons name="send" color={Colors.text} size={18} />
                 </Pressable>
               </View>
 
               {toast ? (
-                <View style={styles.toast} pointerEvents="none" testID="homeChatWidgetToast">
+                <View style={styles.toast} pointerEvents="none">
                   <Text style={styles.toastText}>{toast}</Text>
                 </View>
               ) : null}
@@ -456,9 +401,7 @@ export default function HomeChatWidget() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  root: { ...StyleSheet.absoluteFillObject },
   fab: {
     position: 'absolute',
     right: 16,
@@ -473,25 +416,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 10,
   },
-  fabPressed: {
-    transform: [{ scale: 0.98 }],
-  },
-  fabInner: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
-  },
-  kbRoot: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-  },
+  fabPressed: { transform: [{ scale: 0.98 }] },
+  fabInner: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  kbRoot: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 12, paddingBottom: 12 },
   sheet: {
     width: '100%',
     maxHeight: '82%',
@@ -511,22 +439,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  headerLeft: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  sheetTitle: {
-    color: Colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  sheetSubtitle: {
-    marginTop: 2,
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  headerLeft: { flex: 1, paddingRight: 12 },
+  sheetTitle: { color: Colors.text, fontSize: 18, fontWeight: '800', letterSpacing: 0.2 },
+  sheetSubtitle: { marginTop: 2, color: Colors.textSecondary, fontSize: 12, fontWeight: '600' },
   closeButton: {
     width: 36,
     height: 36,
@@ -545,19 +460,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,140,0,0.34)',
   },
-  realtimeBannerPressed: {
-    transform: [{ scale: 0.99 }],
-  },
-  realtimeBannerText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontWeight: '800',
-    lineHeight: 16,
-  },
-  closeButtonPressed: {
-    transform: [{ scale: 0.98 }],
-    backgroundColor: 'rgba(255,255,255,0.09)',
-  },
+  realtimeBannerText: { color: Colors.text, fontSize: 12, fontWeight: '800', lineHeight: 16 },
   errorBox: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -565,17 +468,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  errorTitle: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  errorText: {
-    marginTop: 4,
-    color: Colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 16,
-  },
+  errorTitle: { color: Colors.text, fontSize: 13, fontWeight: '800' },
+  errorText: { marginTop: 4, color: Colors.textSecondary, fontSize: 12, lineHeight: 16 },
   retryButton: {
     alignSelf: 'flex-start',
     marginTop: 10,
@@ -586,52 +480,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(212,175,55,0.38)',
   },
-  retryButtonPressed: {
-    transform: [{ scale: 0.99 }],
-  },
-  retryText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  messagesWrap: {
-    flex: 1,
-    minHeight: 240,
-  },
-  systemBanner: {
-    marginHorizontal: 14,
-    marginTop: 12,
-    marginBottom: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 16,
-    backgroundColor: 'rgba(212,175,55,0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(212,175,55,0.28)',
-  },
-  systemBannerText: {
-    color: Colors.text,
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 18,
-  },
-  loading: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 24,
-  },
-  loadingText: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  listContent: {
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    gap: 10,
-  },
+  retryText: { color: Colors.text, fontSize: 12, fontWeight: '800' },
+  messagesWrap: { flex: 1, minHeight: 240 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 24 },
+  loadingText: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  listContent: { paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
   loadOlder: {
     alignSelf: 'center',
     marginBottom: 10,
@@ -642,60 +495,17 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  loadOlderText: {
-    color: Colors.text,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
-  messageRow: {
-    flexDirection: 'row',
-  },
-  messageRowMine: {
-    justifyContent: 'flex-end',
-  },
-  messageRowTheirs: {
-    justifyContent: 'flex-start',
-  },
-  bubble: {
-    maxWidth: '86%',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-  },
-  bubbleMine: {
-    backgroundColor: 'rgba(212,175,55,0.22)',
-    borderColor: 'rgba(212,175,55,0.45)',
-  },
-  bubbleTheirs: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderColor: 'rgba(255,255,255,0.10)',
-  },
-  messageText: {
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 19,
-  },
-  messageTextMine: {
-    color: Colors.text,
-  },
-  messageTextTheirs: {
-    color: Colors.text,
-  },
-  messageMeta: {
-    marginTop: 6,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  messageMetaMine: {
-    color: 'rgba(255,255,255,0.75)',
-    textAlign: 'right',
-  },
-  messageMetaTheirs: {
-    color: Colors.textSecondary,
-    textAlign: 'left',
-  },
+  loadOlderText: { color: Colors.text, fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
+  messageRow: { flexDirection: 'row' },
+  messageRowMine: { justifyContent: 'flex-end' },
+  messageRowTheirs: { justifyContent: 'flex-start' },
+  bubble: { maxWidth: '86%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1 },
+  bubbleMine: { backgroundColor: 'rgba(212,175,55,0.22)', borderColor: 'rgba(212,175,55,0.45)' },
+  bubbleTheirs: { backgroundColor: 'rgba(255,255,255,0.06)', borderColor: 'rgba(255,255,255,0.10)' },
+  messageText: { color: Colors.text, fontSize: 14, fontWeight: '600', lineHeight: 19 },
+  messageMeta: { marginTop: 6, fontSize: 11, fontWeight: '700' },
+  messageMetaMine: { color: 'rgba(255,255,255,0.75)', textAlign: 'right' },
+  messageMetaTheirs: { color: Colors.textSecondary, textAlign: 'left' },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -716,27 +526,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: Platform.OS === 'web' ? 10 : 8,
   },
-  input: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-    maxHeight: 92,
-    padding: 0,
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendButtonDisabled: {
-    opacity: 0.45,
-  },
-  sendButtonPressed: {
-    transform: [{ scale: 0.98 }],
-  },
+  input: { color: Colors.text, fontSize: 14, fontWeight: '600', maxHeight: 92, padding: 0 },
+  sendButton: { width: 44, height: 44, borderRadius: 16, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  sendButtonDisabled: { opacity: 0.45 },
+  sendButtonPressed: { transform: [{ scale: 0.98 }] },
   toast: {
     position: 'absolute',
     left: 14,
@@ -747,10 +540,5 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
-  toastText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    textAlign: 'center',
-    fontWeight: '700',
-  },
+  toastText: { color: '#FFFFFF', fontSize: 14, textAlign: 'center', fontWeight: '700' },
 });

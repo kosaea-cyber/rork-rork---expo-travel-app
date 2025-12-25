@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { RefreshCw, Send } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import colors from '@/constants/colors';
 import { type Conversation, type Message, useChatStore } from '@/store/chatStore';
@@ -118,7 +118,7 @@ export default function AdminConversationDetail() {
             style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.7 }]}
             onPress={load}
           >
-            <RefreshCw size={18} color={colors.text} />
+            <Ionicons name="refresh-outline" size={18} color={colors.text} />
           </Pressable>
         </View>
 
@@ -199,7 +199,10 @@ export default function AdminConversationDetail() {
           testID="adminMessage.list"
         />
 
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        >
           <View style={styles.inputBar}>
             <TextInput
               testID="adminMessage.input"
@@ -212,11 +215,14 @@ export default function AdminConversationDetail() {
             />
             <Pressable
               testID="adminMessage.send"
-              style={({ pressed }) => [styles.sendBtn, (!text.trim() || pressed) && { opacity: !text.trim() ? 0.5 : 0.85 }]}
+              style={({ pressed }) => [
+                styles.sendBtn,
+                (!text.trim() || pressed) && { opacity: !text.trim() ? 0.5 : 0.85 },
+              ]}
               onPress={onSend}
               disabled={!text.trim()}
             >
-              <Send size={18} color={colors.background} />
+              <Ionicons name="send-outline" size={18} color={colors.background} />
             </Pressable>
           </View>
         </KeyboardAvoidingView>

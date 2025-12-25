@@ -1,12 +1,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { Upload } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import { AsyncImage } from '@/components/AsyncImage';
 import { supabase } from '@/lib/supabase/client';
 import { pickAndUploadImage } from '@/lib/supabase/storageUpload';
 import { useAppImagesStore } from '@/store/appImagesStore';
+
+type AppImageKey = 'heroBackground' | 'welcomeBackground' | 'authBackground' | 'logoUrl';
+type AppImagesState = Record<AppImageKey, string>;
+
+const IMAGE_KEYS: AppImageKey[] = ['heroBackground', 'welcomeBackground', 'authBackground', 'logoUrl'];
 
 function ImageInput({
   label,
@@ -24,37 +38,40 @@ function ImageInput({
   return (
     <View style={styles.inputContainer}>
       <Text style={styles.label}>{label}</Text>
+
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
           value={value}
           onChangeText={onChange}
           placeholder="https://example.com/image.jpg"
+          placeholderTextColor="#999"
           autoCapitalize="none"
         />
-        <TouchableOpacity style={styles.uploadButton} onPress={onPickImage} disabled={uploading}>
-          {uploading ? <ActivityIndicator size="small" color="white" /> : <Upload size={20} color="white" />}
-          <Text style={{color: 'white', fontSize: 12, fontWeight: 'bold'}}>Upload</Text>
+
+        <TouchableOpacity style={styles.uploadButton} onPress={onPickImage} disabled={uploading} activeOpacity={0.85}>
+          {uploading ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Ionicons name="cloud-upload-outline" size={18} color="white" />
+          )}
+          <Text style={styles.uploadButtonText}>Upload</Text>
         </TouchableOpacity>
       </View>
+
       {value ? (
         <View style={styles.previewContainer}>
-            <Text style={styles.previewLabel}>Preview:</Text>
-            <AsyncImage uri={value} style={styles.preview} resizeMode="cover" />
+          <Text style={styles.previewLabel}>Preview:</Text>
+          <AsyncImage uri={value} style={styles.preview} resizeMode="cover" />
         </View>
       ) : null}
     </View>
   );
 }
 
-type AppImageKey = 'heroBackground' | 'welcomeBackground' | 'authBackground' | 'logoUrl';
-
-type AppImagesState = Record<AppImageKey, string>;
-
-const IMAGE_KEYS: AppImageKey[] = ['heroBackground', 'welcomeBackground', 'authBackground', 'logoUrl'];
-
 export default function ManageImages() {
   const router = useRouter();
+
   const [uploadingKey, setUploadingKey] = useState<AppImageKey | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -91,9 +108,7 @@ export default function ManageImages() {
 
       for (const row of res.data ?? []) {
         const k = row.key as AppImageKey;
-        if (IMAGE_KEYS.includes(k)) {
-          next[k] = (row.url as string) ?? '';
-        }
+        if (IMAGE_KEYS.includes(k)) next[k] = (row.url as string) ?? '';
       }
 
       setImages(next);
@@ -110,10 +125,7 @@ export default function ManageImages() {
   }, [fetchImages]);
 
   const updateImage = useCallback((key: AppImageKey, value: string) => {
-    setImages((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+    setImages((prev) => ({ ...prev, [key]: value }));
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -151,25 +163,25 @@ export default function ManageImages() {
     }
   }, [images, router]);
 
-  const pickImage = useCallback(async (key: AppImageKey) => {
-    try {
-      console.log('[admin/images] pickImage pressed', { key });
-      setUploadingKey(key);
+  const pickImage = useCallback(
+    async (key: AppImageKey) => {
+      try {
+        console.log('[admin/images] pickImage pressed', { key });
+        setUploadingKey(key);
 
-      const uploaded = await pickAndUploadImage({ folder: key });
-      if (!uploaded) {
+        const uploaded = await pickAndUploadImage({ folder: key });
+        if (!uploaded) return;
+
+        updateImage(key, uploaded.publicUrl);
+      } catch (e) {
+        console.error('[admin/images] upload failed', e);
+        Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again');
+      } finally {
         setUploadingKey(null);
-        return;
       }
-
-      updateImage(key, uploaded.publicUrl);
-    } catch (e) {
-      console.error('[admin/images] upload failed', e);
-      Alert.alert('Upload failed', e instanceof Error ? e.message : 'Please try again');
-    } finally {
-      setUploadingKey(null);
-    }
-  }, [updateImage]);
+    },
+    [updateImage]
+  );
 
   const isBusy = useMemo(() => loading || saving, [loading, saving]);
 
@@ -187,7 +199,7 @@ export default function ManageImages() {
       <View style={[styles.container, styles.stateWrap]} testID="admin-images-error">
         <Text style={styles.stateTitle}>Couldn’t load images</Text>
         <Text style={styles.stateText}>{errorMessage}</Text>
-        <TouchableOpacity testID="admin-images-retry" style={styles.stateButton} onPress={fetchImages}>
+        <TouchableOpacity testID="admin-images-retry" style={styles.stateButton} onPress={fetchImages} activeOpacity={0.85}>
           <Text style={styles.stateButtonText}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -198,10 +210,10 @@ export default function ManageImages() {
     <ScrollView style={styles.container} testID="admin-images-scroll">
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>App Backgrounds & Images</Text>
-        
+
         <ImageInput
           label="Hero Background (Home Screen)"
-          value={images?.heroBackground || ''}
+          value={images.heroBackground || ''}
           onChange={(val) => updateImage('heroBackground', val)}
           onPickImage={() => pickImage('heroBackground')}
           uploading={uploadingKey === 'heroBackground'}
@@ -209,7 +221,7 @@ export default function ManageImages() {
 
         <ImageInput
           label="Welcome Screen Background"
-          value={images?.welcomeBackground || ''}
+          value={images.welcomeBackground || ''}
           onChange={(val) => updateImage('welcomeBackground', val)}
           onPickImage={() => pickImage('welcomeBackground')}
           uploading={uploadingKey === 'welcomeBackground'}
@@ -217,7 +229,7 @@ export default function ManageImages() {
 
         <ImageInput
           label="Auth Screens Background (Login/Register)"
-          value={images?.authBackground || ''}
+          value={images.authBackground || ''}
           onChange={(val) => updateImage('authBackground', val)}
           onPickImage={() => pickImage('authBackground')}
           uploading={uploadingKey === 'authBackground'}
@@ -225,16 +237,28 @@ export default function ManageImages() {
 
         <ImageInput
           label="App Logo URL (Optional override)"
-          value={images?.logoUrl || ''}
+          value={images.logoUrl || ''}
           onChange={(val) => updateImage('logoUrl', val)}
           onPickImage={() => pickImage('logoUrl')}
           uploading={uploadingKey === 'logoUrl'}
         />
-
       </View>
 
-      <TouchableOpacity style={[styles.saveButton, isBusy ? { opacity: 0.7 } : null]} onPress={handleSave} disabled={isBusy} testID="admin-images-save">
-        <Text style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save All Changes'}</Text>
+      <TouchableOpacity
+        style={[styles.saveButton, isBusy ? { opacity: 0.7 } : null]}
+        onPress={handleSave}
+        disabled={isBusy}
+        testID="admin-images-save"
+        activeOpacity={0.85}
+      >
+        {saving ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <ActivityIndicator color="white" />
+            <Text style={styles.saveButtonText}>Saving…</Text>
+          </View>
+        ) : (
+          <Text style={styles.saveButtonText}>Save All Changes</Text>
+        )}
       </TouchableOpacity>
     </ScrollView>
   );
@@ -292,13 +316,19 @@ const styles = StyleSheet.create({
   },
   uploadButton: {
     backgroundColor: Colors.tint,
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
-    minWidth: 90,
+    minWidth: 96,
+  },
+  uploadButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   previewContainer: {
     marginTop: 10,

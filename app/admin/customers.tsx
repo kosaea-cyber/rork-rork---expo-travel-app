@@ -13,7 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Search, ArrowUpDown, UserRound, Shield, ShieldOff, X, CalendarDays } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import Colors from '@/constants/colors';
 import { supabase } from '@/lib/supabase/client';
 import { paged } from '@/lib/supabase/queries';
@@ -258,47 +258,43 @@ export default function CustomersPage() {
     });
   }, [cursorValue, fetchPage, hasMore, loading, loadingMore]);
 
-  const askAndToggleRole = useCallback(
-    async (profile: ProfileRow) => {
-      const currentRole = (profile.role ?? 'customer') as ProfileRole;
-      const nextRole: ProfileRole = currentRole === 'admin' ? 'customer' : 'admin';
+  const askAndToggleRole = useCallback(async (profile: ProfileRow) => {
+    const currentRole = (profile.role ?? 'customer') as ProfileRole;
+    const nextRole: ProfileRole = currentRole === 'admin' ? 'customer' : 'admin';
 
-      Alert.alert(
-        `${nextRole === 'admin' ? 'Promote to admin' : 'Demote to customer'}?`,
-        `${safeProfileName(profile)} will become ${roleLabel(nextRole)}.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Confirm',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                console.log('[admin/customers] update role', {
-                  id: profile.id,
-                  from: currentRole,
-                  to: nextRole,
-                });
-                const { error: upErr } = await supabase
-                  .from('profiles')
-                  .update({ role: nextRole })
-                  .eq('id', profile.id);
+    Alert.alert(
+      `${nextRole === 'admin' ? 'Promote to admin' : 'Demote to customer'}?`,
+      `${safeProfileName(profile)} will become ${roleLabel(nextRole)}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('[admin/customers] update role', {
+                id: profile.id,
+                from: currentRole,
+                to: nextRole,
+              });
 
-                if (upErr) throw upErr;
+              const { error: upErr } = await supabase
+                .from('profiles')
+                .update({ role: nextRole })
+                .eq('id', profile.id);
 
-                setItems((prev) =>
-                  prev.map((p) => (p.id === profile.id ? { ...p, role: nextRole } : p))
-                );
-              } catch (e) {
-                console.error('[admin/customers] update role failed', e);
-                Alert.alert('Could not update role', 'Please try again.');
-              }
-            },
+              if (upErr) throw upErr;
+
+              setItems((prev) => prev.map((p) => (p.id === profile.id ? { ...p, role: nextRole } : p)));
+            } catch (e) {
+              console.error('[admin/customers] update role failed', e);
+              Alert.alert('Could not update role', 'Please try again.');
+            }
           },
-        ]
-      );
-    },
-    []
-  );
+        },
+      ]
+    );
+  }, []);
 
   const renderRow = useCallback(
     ({ item }: { item: ProfileRow }) => {
@@ -330,14 +326,14 @@ export default function CustomersPage() {
 
               <View style={styles.rowMetaLine}>
                 <View style={styles.metaPill}>
-                  <UserRound size={14} color={Colors.textSecondary} />
+                  <Ionicons name="person-circle-outline" size={14} color={Colors.textSecondary} />
                   <Text style={styles.metaPillText} numberOfLines={1}>
                     {item.phone?.trim() ? item.phone : item.id.slice(0, 8)}
                   </Text>
                 </View>
 
                 <View style={styles.metaPill}>
-                  <CalendarDays size={14} color={Colors.textSecondary} />
+                  <Ionicons name="calendar-outline" size={14} color={Colors.textSecondary} />
                   <Text style={styles.metaPillText}>{formatDateShort(item.created_at)}</Text>
                 </View>
 
@@ -353,6 +349,7 @@ export default function CustomersPage() {
               testID={`adminCustomersRowEdit-${item.id}`}
               style={styles.actionBtn}
               onPress={() => router.push(`/admin/customer/${item.id}`)}
+              activeOpacity={0.85}
             >
               <Text style={styles.actionText}>Edit</Text>
             </TouchableOpacity>
@@ -363,11 +360,12 @@ export default function CustomersPage() {
               onPress={() => {
                 askAndToggleRole(item).catch((e) => console.error('[admin/customers] toggle role err', e));
               }}
+              activeOpacity={0.85}
             >
               {item.role === 'admin' ? (
-                <ShieldOff size={16} color={Colors.text} />
+                <Ionicons name="shield-outline" size={16} color={Colors.text} />
               ) : (
-                <Shield size={16} color={Colors.text} />
+                <Ionicons name="shield-checkmark-outline" size={16} color={Colors.text} />
               )}
               <Text style={styles.actionText}>{item.role === 'admin' ? 'Demote' : 'Promote'}</Text>
             </TouchableOpacity>
@@ -391,7 +389,7 @@ export default function CustomersPage() {
     <View style={styles.container} testID="adminCustomersScreen">
       <View style={styles.topBar}>
         <View style={styles.searchWrap}>
-          <Search size={18} color={Colors.textSecondary} />
+          <Ionicons name="search-outline" size={18} color={Colors.textSecondary} />
           <TextInput
             testID="adminCustomersSearch"
             style={styles.searchInput}
@@ -402,8 +400,8 @@ export default function CustomersPage() {
             autoCapitalize="none"
           />
           {search.trim().length > 0 ? (
-            <TouchableOpacity testID="adminCustomersSearchClear" onPress={() => setSearch('')}>
-              <X size={18} color={Colors.textSecondary} />
+            <TouchableOpacity testID="adminCustomersSearchClear" onPress={() => setSearch('')} activeOpacity={0.85}>
+              <Ionicons name="close" size={18} color={Colors.textSecondary} />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -413,6 +411,7 @@ export default function CustomersPage() {
             testID="adminCustomersFiltersOpen"
             style={styles.controlBtn}
             onPress={() => setFiltersOpen(true)}
+            activeOpacity={0.85}
           >
             <Text style={styles.controlBtnText}>Filters{activeFiltersCount ? ` (${activeFiltersCount})` : ''}</Text>
           </TouchableOpacity>
@@ -426,8 +425,9 @@ export default function CustomersPage() {
               const next = order[(idx + 1) % order.length] ?? 'newest';
               setSort(next);
             }}
+            activeOpacity={0.85}
           >
-            <ArrowUpDown size={16} color={Colors.text} />
+            <Ionicons name="swap-vertical-outline" size={16} color={Colors.text} />
             <Text style={styles.controlBtnText}>{sortLabel(sort)}</Text>
           </TouchableOpacity>
         </View>
@@ -442,7 +442,7 @@ export default function CustomersPage() {
         <View style={styles.stateWrap} testID="adminCustomersError">
           <Text style={styles.stateTitle}>Couldn’t load customers</Text>
           <Text style={styles.stateText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={onRetry} testID="adminCustomersRetry">
+          <TouchableOpacity style={styles.retryBtn} onPress={onRetry} testID="adminCustomersRetry" activeOpacity={0.85}>
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -480,6 +480,7 @@ export default function CustomersPage() {
                   testID="adminCustomersLoadMore"
                   style={styles.loadMoreBtn}
                   onPress={onLoadMore}
+                  activeOpacity={0.85}
                 >
                   <Text style={styles.loadMoreText}>Load more</Text>
                 </TouchableOpacity>
@@ -497,12 +498,16 @@ export default function CustomersPage() {
         transparent
         onRequestClose={() => setFiltersOpen(false)}
       >
-        <Pressable style={styles.modalBackdrop} onPress={() => setFiltersOpen(false)} testID="adminCustomersFiltersBackdrop" />
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setFiltersOpen(false)}
+          testID="adminCustomersFiltersBackdrop"
+        />
         <View style={styles.modalCard} testID="adminCustomersFiltersModal">
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Filters</Text>
-            <TouchableOpacity testID="adminCustomersFiltersClose" onPress={() => setFiltersOpen(false)}>
-              <X size={20} color={Colors.text} />
+            <TouchableOpacity testID="adminCustomersFiltersClose" onPress={() => setFiltersOpen(false)} activeOpacity={0.85}>
+              <Ionicons name="close" size={20} color={Colors.text} />
             </TouchableOpacity>
           </View>
 
@@ -515,6 +520,7 @@ export default function CustomersPage() {
                   testID={`adminCustomersFilterRole-${r}`}
                   style={[styles.segment, role === r && styles.segmentActive]}
                   onPress={() => setRole(r)}
+                  activeOpacity={0.85}
                 >
                   <Text style={[styles.segmentText, role === r && styles.segmentTextActive]}>
                     {r === 'all' ? 'All' : roleLabel(r)}
@@ -533,6 +539,7 @@ export default function CustomersPage() {
                   testID={`adminCustomersFilterLang-${l}`}
                   style={[styles.segment, language === l && styles.segmentActive]}
                   onPress={() => setLanguage(l)}
+                  activeOpacity={0.85}
                 >
                   <Text style={[styles.segmentText, language === l && styles.segmentTextActive]}>
                     {l === 'all' ? 'All' : l.toUpperCase()}
@@ -582,6 +589,7 @@ export default function CustomersPage() {
                 setLanguage('all');
                 setDateRange({ from: '', to: '' });
               }}
+              activeOpacity={0.85}
             >
               <Text style={styles.footerBtnGhostText}>Reset</Text>
             </TouchableOpacity>
@@ -602,6 +610,7 @@ export default function CustomersPage() {
                 }
                 setFiltersOpen(false);
               }}
+              activeOpacity={0.85}
             >
               <Text style={styles.footerBtnText}>Apply</Text>
             </TouchableOpacity>
